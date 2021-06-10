@@ -9,11 +9,11 @@ The Hierarchical search pipeline looks for GW signals emitted from non-precessin
 2. **Stage-2** search follows up the coincident triggers from stage-1 and again perform matched filtering analysis over a *Stage-2 Bank* and data sampled at higher frequency.
 
 
- **NOTE**: 
- - Currently the search is carried out by separately running two workflows one-after-another. First we run a workflow for stage-1 using the configuration files provided in **stage-1_configs**. After the workflow finishes, we run a workflow for stage-2 using the configuration files given in **stage-2_configs** directory. 
- - The two workflows are executed in two separate directories inside a main local directory (`/home/albert.einstein/search/`) to avoid the confusion. Let's name these directories as: `coarse` for stage-1, and `hierarchical` for stage-2.
- - All the banks used in the search are downloaded to `/home/albert.einstein/search/`. Let's call this directory as `banks`.
- - **This setup is a temporary arrangement. We plan to combine both stages together in the future and make it as one complete workflow**
+ > **NOTE**: 
+ > - Currently the search is carried out by separately running two workflows one-after-another. First we run a workflow for stage-1 using the configuration files provided in **stage-1_configs**. After the workflow finishes, we run a workflow for stage-2 using the configuration files given in **stage-2_configs** directory. 
+ > - The two workflows are executed in two separate directories inside a main local directory (`/home/albert.einstein/search/`) to avoid the confusion. Let's name these directories as: `coarse` for stage-1, and `hierarchical` for stage-2.
+ > - All the banks used in the search are downloaded to `/home/albert.einstein/search/`. Let's call this directory as `banks`.
+ > - **This setup is a temporary arrangement. We plan to combine both stages together in the future and make it as one complete workflow**
 
 ## Instructions to create a workflow for stage-1 search
 To perform the stage-1 search, use the workflow `pycbc_make_coinc_search_workflow`, which is also used by [flat-search](https://git.ligo.org/ligo-cbc/pycbc-config/-/blob/master/O3C01/pipelineHL/README.md)
