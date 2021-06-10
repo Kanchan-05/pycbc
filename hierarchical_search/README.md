@@ -1,4 +1,4 @@
-# 2-stage Hierarchical Search Pipeline
+# Two-stage Hierarchical Search Pipeline
 
 This directory contains all the necessary configuration files for running a **Two-stage Hierarchical Pipeline** for a two-ifos. To know the working of this pipeline see: 
 - [Soni et al. (2021)]()
