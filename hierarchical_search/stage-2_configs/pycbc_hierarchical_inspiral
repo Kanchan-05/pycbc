@@ -1,5 +1,5 @@
 #!/cvmfs/oasis.opensciencegrid.org/ligo/sw/pycbc/x86_64_rhel_7/virtualenv/pycbc-v1.16.13/bin/python
-##/usr/bin/env python
+
 
 # Copyright (C) 2014 Alex Nitz
 #
@@ -223,9 +223,6 @@ class CoarseCoincTriggers(object):
         for fl in findtrigfiles:
             # print 'reading coinc trigger file ', fl
             f = h5py.File(fl, 'r')
-            # forids = numpy.logical_not(f['timeslide_id'][:] == 0)
-            # print 'high and low timeslide ids', f['timeslide_id'][:].max(), f['timeslide_id'][:].min()
-            
             
             if len(f.keys())> 1:   
                 forids = (numpy.abs(f['timeslide_id'][:])==0)
@@ -252,7 +249,6 @@ class CoarseCoincTriggers(object):
     # new-bank is created on the basis of connection file (for each template_id in coarse, there exist template_id(s) in fine bank with MM=0.75)
     def bank_for_segment(self, start_time, end_time, stat_threshold=None):
         
-        #print 'for start-endtime------------------',start_time, end_time
         import copy
         seg_tid = self.templates_in_segment(start_time, end_time, stat_threshold)
         
@@ -262,16 +258,13 @@ class CoarseCoincTriggers(object):
         for t in seg_tid:
             print 'seg_tid', t
             
-            #if t < len(seg_tid):
-            #if t < max(seg_tid):
             temp = numpy.array(self._conn_f[str(t)+'/Fine_hashid'][...])
-            #print 'temp:',temp
-                
+            
             if numpy.size(temp)!=1:
                 lst += temp.tolist()
             else:
                 lst.append(temp)
-            #    break
+                
         
         if lst:
             newbank = copy.copy(self.fine_bank)
@@ -405,9 +398,6 @@ with ctx:
         seg /= seg.psd
 
     # fine bank to actually do matched filter
-    
-    # KANCHAN---> replacing opt.fine_bank_file to opt.bank_file
-    # new edits --> kanchan opt.bank_file to opt.coarse_bank_file
     logging.info("Read in fine template bank:{0}".format(opt.bank_file))
     print "Read in fine template bank:{0}".format(opt.bank_file)
     bank = waveform.FilterBank(opt.bank_file, flen, delta_f,
@@ -457,24 +447,9 @@ with ctx:
         # Get new_bank for the segment using triggers corresponding to the current segments
         print stilde.psd.dtype
         print 'seg_cumu_index', 1.*stilde.cumulative_index/opt.sample_rate
-        # print stilde.analyze.start/opt.sample_rate
-        # print stilde.analyze.stop/opt.sample_rate
         seg_start = 1.*(stilde.cumulative_index)/opt.sample_rate+opt.gps_start_time
         seg_end = 1.*(stilde.cumulative_index+stilde.analyze.stop)/opt.sample_rate+opt.gps_start_time
         
-        
-        #seg_start= 1126798010.0 
-        #seg_end =1126798498.0
-        #print seg_start, seg_end
-        
-        # continue
-        # seg_start = stilde.start
-        # seg_end = seg_start + 1.0/stilde.delta_f
-        # seg_start, seg_end = 1126260774.6, 1126260774.6 + 2560
-        # print 'seg times', seg_start, seg_end
-        # continue
-        # To chose parameter space region in template bank for sub-banks, we
-        # calculate 2 matches.
         # FIXME: Currently will use 'None' or 'aLIGOZeroDetHighPower' as psd for
         # this. We will be using segment psd as once we get match with throwaway
         # segment ends to so that psd and numerical effects can be kept at bay.
@@ -485,7 +460,6 @@ with ctx:
         new_bank = coarse_trig.bank_for_segment(seg_start, seg_end, opt.hierarchical_stat_threshold)
         
         # keeping a count how many new_banks are created per segment above hierarchical stat threshold 
-        
         
         if not new_bank:
             continue
@@ -584,7 +558,6 @@ logging.info("Outputting %s triggers" % str(len(event_mgr.events)))
 print "Outputting %s triggers" % str(len(event_mgr.events))
 tstop = time.time()
 run_time = tstop - tstart
-#event_mgr.save_performance(ncores, nfilters, ntemplates, run_time, tsetup)
 event_mgr.save_performance(ncores, nfilters, newbank_count, run_time, tsetup)
 
 print 'ntemplates_count',newbank_count
@@ -602,10 +575,6 @@ if opt.fftw_output_float_wisdom_file:
 if opt.fftw_output_double_wisdom_file:
     fft.fftw.export_double_wisdom_to_filename(opt.fftw_output_double_wisdom_file)
 
-#outfile = h5py.File(opt.output+"segment_summary", 'w')
-#outfile.create_dataset("ntemplates_used", data=newbank_count)
-#outfile.create_dataset("nsegments", data=segment_count)
-#outfile.close()
 
 logging.info("Finished")
 print "Finished"
