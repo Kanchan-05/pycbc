@@ -2,7 +2,7 @@
 
 This directory contains all the necessary configuration files for running a **Two-stage Hierarchical Pipeline** for a two-ifos. To know the working of this pipeline see: 
 - [Soni et al. (2021)](https://arxiv.org/pdf/2106.08925.pdf)
-- [Gadre  et al. (2019).](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.99.124035) 
+- [Gadre  et al. (2019)](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.99.124035) 
 
 The Hierarchical search pipeline looks for GW signals emitted from non-precessing CBCs with quasicircular orbits. The pipeline search over parameter space via matched filtering in two stages: Stage-1 and Stage-2
 1. **Stage-1** searches for the signals using a *Coarse Bank* and data sampled at lower frequency. 
@@ -130,3 +130,17 @@ fitstage1 = ["/home/albert.einstein/search/coarse/output/fit_over_param/H1-FIT_O
 
 
 For further details including run diagnosis and debugging see [LINK](https://pycbc.org/pycbc/latest/html/workflow/pycbc_make_coinc_search_workflow.html#monitor-and-debug-the-workflow-detailed-pegasus-documentation)
+
+## License and Citation
+We encourage to cite the paper and references to the codes: 
+```
+@article{Soni:2021XXX,
+    author = "Soni, K. and Gadre, B. U. and Mitra, S. and Dhurandhar, S.",
+    title = "{Hierarchical search for compact binary coalescences in the Advanced LIGO’s first two observing runs}",
+    eprint = "2106.08925",
+    archivePrefix = "arXiv",
+    primaryClass = "gr-qc",
+    month = "6",
+    year = "2021"
+}
+```
