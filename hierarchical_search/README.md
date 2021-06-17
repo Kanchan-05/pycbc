@@ -1,7 +1,7 @@
 # Two-stage Hierarchical Search Pipeline
 
 This directory contains all the necessary configuration files for running a **Two-stage Hierarchical Pipeline** for a two-ifos. To know the working of this pipeline see: 
-- [Soni et al. (2021)]()
+- [Soni et al. (2021)](https://arxiv.org/pdf/2106.08925.pdf)
 - [Gadre  et al. (2019).](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.99.124035) 
 
 The Hierarchical search pipeline looks for GW signals emitted from non-precessing CBCs with quasicircular orbits. The pipeline search over parameter space via matched filtering in two stages: Stage-1 and Stage-2
@@ -94,7 +94,7 @@ To run the workflow, follow the steps:
     - *coincidence.py*
   
   Analyst should make sure that the modified files named as *hierarchical_segment.py*, *hierarchical_matched_filter.py*, *hierarchical_jobsetup.py*, *hierarchical_core.py*, *hierarchical_coincidence.py* are downloaded from **stage-2_configs** in the `/home/albert.einstein/search/hierarchical/` before running the workflow. 
- - As described in [Soni et al. (2021)](), the fit coefficients for the ranking statistics, is generated using stage-1 triggers. Therefore, we generate fit values by running `pycbc_hierarchical_fit_sngls`, and `pycbc_fit_over_param_combine` for each detector. 
+ - As described in [Soni et al. (2021)](https://arxiv.org/pdf/2106.08925.pdf), the fit coefficients for the ranking statistics, is generated using stage-1 triggers. Therefore, we generate fit values by running `pycbc_hierarchical_fit_sngls`, and `pycbc_fit_over_param_combine` for each detector. 
 
 ### General Comments for stage-2 search
 
