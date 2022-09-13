@@ -1,0 +1,11 @@
+*.~
+*.so
+.DS_Store
+*.log
+dist/
+html/
+pycbc_inspiralc
+build/
+*.pyc
+docs/Makefile
+PyCBC.egg-info
