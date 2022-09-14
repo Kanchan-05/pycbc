@@ -929,9 +929,6 @@ class ExpFitStatistic(NewSNRStatistic):
         alphai = self.fits_by_tid[ifo]['alpha'][tnum]
         ratei = self.fits_by_tid[ifo]['rate'][tnum]
         thresh = self.fits_by_tid[ifo]['thresh']
-        print '*********************'
-        print 'template_id',tnum
-        print ratei
         return alphai, ratei, thresh
 
     def lognoiserate(self, trigs):
@@ -1436,7 +1433,6 @@ class ExpFitSGFgBgNormNewStatistic(PhaseTDNewStatistic,
         bt = newsnr < thresh
         lognoisel = - alphai * (newsnr - thresh) + numpy.log(alphai) + \
                         numpy.log(ratei)
-        print 'rate error----'
         lognoiselbt = - alphabelow * (newsnr - thresh) + \
                            numpy.log(alphabelow) + numpy.log(ratei)
         lognoisel[bt] = lognoiselbt[bt]
@@ -1448,9 +1444,6 @@ class ExpFitSGFgBgNormNewStatistic(PhaseTDNewStatistic,
         sngl_stat = self.lognoiserate(trigs)
         # populate other fields to calculate phase/time/amp consistency
         # and sigma comparison
-        print 'checking======= sngl_stat',sngl_stat
-        print numpy.isinf in numpy.array(sngl_stat)
-        
         singles = numpy.zeros(len(sngl_stat), dtype=self.single_dtype)
         singles['snglstat'] = sngl_stat
         singles['coa_phase'] = trigs['coa_phase'][:]
@@ -1619,8 +1612,6 @@ class ExpFitSGPSDFgBgNormBBHStatistic(ExpFitSGFgBgNormNewStatistic):
         if self.mcm is not None:
             # Careful - input might be a str, so cast to float
             self.curr_mchirp = min(self.curr_mchirp, float(self.mcm))
-        print 'this is working----'
-        print 'self.curr_mchirp ',self.curr_mchirp 
 	return ExpFitSGFgBgNormNewStatistic.single(self, trigs)
 
     def logsignalrate_multiifo(self, stats, shift, to_shift):
