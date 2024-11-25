@@ -17,8 +17,8 @@
 """
 Provides a class representing a time series.
 """
-from __future__ import division
-import os as _os, h5py
+import os as _os
+import h5py
 from pycbc.types.array import Array, _convert, complex_same_precision_as, zeros
 from pycbc.types.array import _nocomplex
 from pycbc.types.frequencyseries import FrequencySeries
@@ -42,15 +42,6 @@ class TimeSeries(Array):
         Sample data type.
     copy : boolean, optional
         If True, samples are copied to a new array.
-
-    Attributes
-    ----------
-    delta_t
-    duration
-    start_time
-    end_time
-    sample_times
-    sample_rate
     """
 
     def __init__(self, initial_array, delta_t=None,
@@ -82,6 +73,20 @@ class TimeSeries(Array):
         Array.__init__(self, initial_array, dtype=dtype, copy=copy)
         self._delta_t = delta_t
         self._epoch = epoch
+
+    def to_astropy(self, name='pycbc'):
+        """ Return an astropy.timeseries.TimeSeries instance
+        """
+        from astropy.timeseries import TimeSeries as ATimeSeries
+        from astropy.time import Time
+        from astropy.units import s
+
+        start = Time(float(self.start_time), format='gps', scale='utc')
+        delta = self.delta_t * s
+        return ATimeSeries({name: self.numpy()},
+                           time_start=start,
+                           time_delta=delta,
+                           n_samples=len(self))
 
     def epoch_close(self, other):
         """ Check if the epoch is close enough to allow operations """
@@ -184,10 +189,10 @@ class TimeSeries(Array):
         start_idx = float(start - self.start_time) * self.sample_rate
         end_idx = float(end - self.start_time) * self.sample_rate
 
-        if _numpy.isclose(start_idx, round(start_idx)):
+        if _numpy.isclose(start_idx, round(start_idx), rtol=0, atol=1E-3):
             start_idx = round(start_idx)
 
-        if _numpy.isclose(end_idx, round(end_idx)):
+        if _numpy.isclose(end_idx, round(end_idx), rtol=0, atol=1E-3):
             end_idx = round(end_idx)
 
         if mode == 'floor':
@@ -236,12 +241,78 @@ class TimeSeries(Array):
     sample_times = property(get_sample_times,
                             doc="Array containing the sample times.")
 
-    def at_time(self, time, nearest_sample=False):
-        """ Return the value at the specified gps time
+    def at_time(self, time, nearest_sample=False,
+                interpolate=None, extrapolate=None):
+        """Return the value of the TimeSeries at the specified GPS time.
+
+        Parameters
+        ----------
+        time: scalar or array-like
+            GPS time at which the value is wanted. Note that LIGOTimeGPS
+            objects count as scalar.
+        nearest_sample: bool
+            Return the sample at the time nearest to the chosen time rather
+            than rounded down.
+        interpolate: str, None
+            Return the interpolated value of the time series. Choices
+            are simple linear or quadratic interpolation.
+        extrapolate: str or float, None
+            Value to return if time is outside the range of the vector or
+            method of extrapolating the value.
         """
         if nearest_sample:
-            time += self.delta_t / 2.0
-        return self[int((time-self.start_time)*self.sample_rate)]
+            time = time + self.delta_t / 2.0
+        vtime = _numpy.array(time, ndmin=1)
+
+        fill_value = None
+        keep_idx = None
+        size = len(vtime)
+        if extrapolate is not None:
+            if _numpy.isscalar(extrapolate) and _numpy.isreal(extrapolate):
+                fill_value = extrapolate
+                facl = facr = 0
+                if interpolate == 'quadratic':
+                    facl = facr = 1.1
+                elif interpolate == 'linear':
+                    facl, facr = 0.1, 1.1
+
+                left = (vtime >= self.start_time + self.delta_t * facl)
+                right = (vtime < self.end_time - self.delta_t * facr)
+                keep_idx = _numpy.where(left & right)[0]
+                vtime = vtime[keep_idx]
+            else:
+                raise ValueError(f"Unsupported extrapolate: {extrapolate}")
+
+        fi = (vtime - float(self.start_time)) * self.sample_rate
+        i = _numpy.asarray(_numpy.floor(fi)).astype(int)
+        di = fi - i
+
+        if interpolate == 'linear':
+            a = self[i]
+            b = self[i+1]
+            ans = a + (b - a) * di
+        elif interpolate == 'quadratic':
+            c = self.data[i]
+            xr = self.data[i + 1] - c
+            xl = self.data[i - 1] - c
+            a = 0.5 * (xr + xl)
+            b = 0.5 * (xr - xl)
+            ans = a * di**2.0 + b * di + c
+        else:
+            ans = self[i]
+
+        ans = _numpy.array(ans, ndmin=1)
+        if fill_value is not None:
+            old = ans
+            ans = _numpy.zeros(size) + fill_value
+            ans[keep_idx] = old
+            ans = _numpy.array(ans, ndmin=1)
+
+        if _numpy.ndim(time) == 0:
+            return ans[0]
+        return ans
+
+    at_times = at_time
 
     def __eq__(self,other):
         """
@@ -486,7 +557,7 @@ class TimeSeries(Array):
             Frequency series containing the estimated PSD.
         """
         from pycbc.psd import welch
-        seg_len = int(segment_duration * self.sample_rate)
+        seg_len = int(round(segment_duration * self.sample_rate))
         seg_stride = int(seg_len / 2)
         return welch(self, seg_len=seg_len,
                            seg_stride=seg_stride,
@@ -527,15 +598,31 @@ class TimeSeries(Array):
             # Uses the hole-filling method of
             # https://arxiv.org/pdf/1908.05644.pdf
             from pycbc.strain.gate import gate_and_paint
+            from pycbc.waveform.utils import apply_fd_time_shift
             if invpsd is None:
                 # These are some bare minimum settings, normally you
                 # should probably provide a psd
                 invpsd = 1. / self.filter_psd(self.duration/32, self.delta_f, 0)
             lindex = int((time - window - self.start_time) / self.delta_t)
-            rindex = lindex + int(2 * window / self.delta_t)
+            rindex = int((time + window - self.start_time) / self.delta_t)
             lindex = lindex if lindex >= 0 else 0
             rindex = rindex if rindex <= len(self) else len(self)
-            return gate_and_paint(data, lindex, rindex, invpsd, copy=False)
+            rindex_time = float(self.start_time + rindex * self.delta_t)
+            offset = rindex_time - (time + window)
+            if offset == 0:
+                return gate_and_paint(data, lindex, rindex, invpsd, copy=False)
+            else:
+                # time shift such that gate end time lands on a specific data sample
+                fdata = data.to_frequencyseries()
+                fdata = apply_fd_time_shift(fdata, offset + fdata.epoch, copy=False)
+                # gate and paint in time domain
+                data = fdata.to_timeseries()
+                data = gate_and_paint(data, lindex, rindex, invpsd, copy=False)
+                # shift back to the original time
+                fdata = data.to_frequencyseries()
+                fdata = apply_fd_time_shift(fdata, -offset + fdata.epoch, copy=False)
+                tdata = fdata.to_timeseries()
+                return tdata
         elif method == 'hard':
             tslice = data.time_slice(time - window, time + window)
             tslice[:] = 0
@@ -567,7 +654,7 @@ class TimeSeries(Array):
         """
         from pycbc.psd import interpolate, inverse_spectrum_truncation
         p = self.psd(segment_duration)
-        samples = int(p.sample_rate * segment_duration)
+        samples = int(round(p.sample_rate * segment_duration))
         p = interpolate(p, delta_f)
         return inverse_spectrum_truncation(p, samples,
                                            low_frequency_cutoff=flow,
@@ -610,7 +697,7 @@ class TimeSeries(Array):
         # Estimate the noise spectrum
         psd = self.psd(segment_duration, **kwds)
         psd = interpolate(psd, self.delta_f)
-        max_filter_len = int(max_filter_duration * self.sample_rate)
+        max_filter_len = int(round(max_filter_duration * self.sample_rate))
 
         # Interpolate and smooth to the desired corruption length
         psd = inverse_spectrum_truncation(psd,
@@ -661,7 +748,7 @@ class TimeSeries(Array):
             The two dimensional interpolated qtransform of this time series.
         """
         from pycbc.filter.qtransform import qtiling, qplane
-        from scipy.interpolate import interp2d
+        from scipy.interpolate import RectBivariateSpline as interp2d
 
         if frange is None:
             frange = (30, int(self.sample_rate / 2 * 8))
@@ -675,10 +762,11 @@ class TimeSeries(Array):
         # Interpolate if requested
         if delta_f or delta_t or logfsteps:
             if return_complex:
-                interp_amp = interp2d(times, freqs, abs(q_plane))
-                interp_phase = interp2d(times, freqs, _numpy.angle(q_plane))
+                interp_amp = interp2d(freqs, times, abs(q_plane), kx=1, ky=1)
+                interp_phase = interp2d(freqs, times, _numpy.angle(q_plane),
+                                        kx=1, ky=1)
             else:
-                interp = interp2d(times, freqs, q_plane)
+                interp = interp2d(freqs, times, q_plane, kx=1, ky=1)
 
         if delta_t:
             times = _numpy.arange(float(self.start_time),
@@ -692,10 +780,10 @@ class TimeSeries(Array):
 
         if delta_f or delta_t or logfsteps:
             if return_complex:
-                q_plane = _numpy.exp(1.0j * interp_phase(times, freqs))
-                q_plane *= interp_amp(times, freqs)
+                q_plane = _numpy.exp(1.0j * interp_phase(freqs, times))
+                q_plane *= interp_amp(freqs, times)
             else:
-                q_plane = interp(times, freqs)
+                q_plane = interp(freqs, times)
 
         return times, freqs, q_plane
 
@@ -795,6 +883,22 @@ class TimeSeries(Array):
         from pycbc.filter import fir_zero_filter
         return self._return(fir_zero_filter(coeff, self))
 
+    def resample(self, delta_t):
+        """ Resample this time series to the new delta_t
+
+        Parameters
+        -----------
+        delta_t: float
+            The time step to resample the times series to.
+
+        Returns
+        -------
+        resampled_ts: pycbc.types.TimeSeries
+            The resample timeseries at the new time interval delta_t.
+        """
+        from pycbc.filter import resample_to_delta_t
+        return resample_to_delta_t(self, delta_t)
+
     def save(self, path, group = None):
         """
         Save time series to a Numpy .npy, hdf, or text file. The first column
@@ -884,6 +988,7 @@ class TimeSeries(Array):
                            dtype=complex_same_precision_as(self)),
                            delta_f=delta_f)
         fft(tmp, f)
+        f._delta_f = delta_f
         return f
 
     def inject(self, other, copy=True):

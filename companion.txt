@@ -4,12 +4,32 @@ gwpy>=0.8.1
 # HEALPix is very useful for some analysis.
 healpy
 
-# Needed for gracedb uploads and skymap generation
-ligo-gracedb
-ligo.skymap; python_version >= '3.5'
+# Needed for GraceDB uploads and skymap generation
+ligo-gracedb>=2.10.0
+#ligo.skymap!=1.1.0
+# Temporarily use fork that doesn't force numpy<2.0 incompatibilities
+# Remove when PR merged, or numpy > 2.0 is a hard requirement
+# https://github.com/lpsinger/ligo.skymap/pull/28
+git+https://github.com/ahnitz/ligo.skymap@lreq
 
 # auxiliary samplers
-cpnest; python_version >= '3.5'
+epsie>=1.0
+cpnest
 pymultinest
 ultranest
 https://github.com/willvousden/ptemcee/archive/master.tar.gz
+# Force the cpu-only version of PyTorch
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+nessai>=0.11.0
+snowline
+
+# useful to look at PyCBC Live with htop
+setproctitle
+
+# Needed for `population_models` module
+sympy>=1.9
+
+# Needed for KDE trigger statistics
+git+https://github.com/mennthor/awkde.git@master
+scikit-learn

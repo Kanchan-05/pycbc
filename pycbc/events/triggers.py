@@ -16,12 +16,15 @@
 """ This modules contains functions for reading single and coincident triggers
 from the command line.
 """
-
+import logging
 import h5py
 import numpy
+
 from pycbc import conversions, pnutils
 from pycbc.events import coinc
 import pycbc.detector
+
+logger = logging.getLogger('pycbc.events.triggers')
 
 
 def insert_bank_bins_option_group(parser):
@@ -224,7 +227,7 @@ def get_inj_param(injfile, param, ifo, args=None):
 
     inj = injfile["injections"]
     if param in inj.keys():
-        return inj["injections/"+param]
+        return inj[param][:]
 
     if param == "end_time_"+ifo[0].lower():
         return inj['end_time'][:] + det.time_delay_from_earth_center(

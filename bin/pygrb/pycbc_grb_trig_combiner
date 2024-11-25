@@ -20,8 +20,6 @@
 """Combine triggers from a splitbank GRB run
 """
 
-from __future__ import (division, print_function)
-
 import argparse
 import os
 from collections import defaultdict
@@ -37,7 +35,9 @@ from gwdatafind.utils import (file_segment, filename_metadata)
 from ligo import segments
 from ligo.segments.utils import fromsegwizard
 
-from pycbc import __version__
+from pycbc import add_common_pycbc_options, init_logging
+from pycbc.results.pygrb_postprocessing_utils import template_hash_to_id
+from pycbc.io.hdf import HFile
 
 __author__ = "Duncan Macleod <duncan.macleod@ligo.org>"
 
@@ -57,6 +57,8 @@ def _init_combined_file(h5file, attributes, datasets, **compression_kw):
     h5file.attrs.update(attributes)
     # create datasets
     for dset, (shape, dtype) in datasets.items():
+        if "template_id" in dset:
+            continue
         h5file.create_dataset(dset, shape=shape, dtype=dtype,
                               **compression_kw)
 
@@ -136,7 +138,7 @@ def merge_hdf5_files(inputfiles, outputfile, verbose=False, **compression_kw):
                 assert dtype == datasets[name][1], (
                     "Cannot merge {0}/{1}, does not match dtype".format(
                         obj.file.filename, name,
-                ))
+                    ))
             datasets[name] = (shape, dtype)
 
             # use default compression options from this file
@@ -149,7 +151,7 @@ def merge_hdf5_files(inputfiles, outputfile, verbose=False, **compression_kw):
     for filename in tqdm.tqdm(inputfiles, desc="Scanning trigger files",
                               disable=not verbose, total=nfiles, unit="files",
                               **TQDM_KW):
-        with h5py.File(filename, 'r') as h5f:
+        with HFile(filename, 'r') as h5f:
             # note: attributes are only recorded from the last file,
             #       since we presume all files have the same attributes
             attributes = dict(h5f.attrs)
@@ -192,20 +194,27 @@ def merge_hdf5_files(inputfiles, outputfile, verbose=False, **compression_kw):
     # record where we are in the global dataset
     position = defaultdict(int)
 
-    with h5py.File(outputfile, 'w') as h5out:
+    with HFile(outputfile, 'w') as h5out:
         _init_combined_file(h5out, attributes, datasets, **compression_kw)
 
         # copy dataset contents
         for filename in tqdm.tqdm(inputfiles, desc="Merging trigger files",
                                   disable=not verbose, total=nfiles,
                                   unit="files", **TQDM_KW):
-            with h5py.File(filename, 'r') as h5in:
+            with HFile(filename, 'r') as h5in:
+                if len(h5in['network']['event_id']) == 0:
+                    continue
                 for dset in dataset_names:
                     # get event_id handling options
                     if dset in network_event_id_names:
                         ifo_event_id_pos = position[network_event_id_names[dset]]
                     else:
                         ifo_event_id_pos = None
+
+                    # Template ID becomes unhelpful in the merged file.
+                    # This will be handled separately.
+                    if "template_id" in dset:
+                        continue
 
                     # merge dataset
                     position[dset] += _merge_dataset(
@@ -218,6 +227,12 @@ def merge_hdf5_files(inputfiles, outputfile, verbose=False, **compression_kw):
             while search_datasets:
                 dataset_names.remove(search_datasets.pop())
 
+        template_ids = template_hash_to_id(trigger_file=h5out, bank_path=args.bank_file)
+        h5out.create_dataset("network/template_id",
+                             data=template_ids,
+                             compression="gzip",
+                             compression_opts=9)
+
     if verbose:
         print("Merged triggers written to {}".format(outputfile))
     return outputfile
@@ -229,7 +244,7 @@ def bin_events(inputfile, bins, outdir, filetag,
     """
     ifotag, _, seg = filename_metadata(inputfile)
 
-    with h5py.File(inputfile, "r") as h5in:
+    with HFile(inputfile, "r") as h5in:
         ifos = [k for k in h5in.keys() if k != "network"]
         times = h5in[column][()]
 
@@ -269,7 +284,7 @@ def bin_events(inputfile, bins, outdir, filetag,
             )
             bar = tqdm.tqdm(total=nsets, desc=msg, disable=not verbose,
                             unit="datasets", **TQDM_KW)
-            with h5py.File(outf, "w") as h5out:
+            with HFile(outf, "w") as h5out:
                 for old in h5in["network"].values():
                     if isinstance(old, h5py.Dataset):
                         h5out.create_dataset(
@@ -279,6 +294,11 @@ def bin_events(inputfile, bins, outdir, filetag,
                             compression_opts=old.compression_opts,
                         )
                         bar.update()
+                    elif isinstance(old, h5py.Group):
+                        # If search group, copy it all over
+                        if "search" in old.name:
+                            h5in.copy(h5in[old.name], h5out, old.name)
+                            bar.update()
                 for ifo in ifos:
                     idx = numpy.in1d(h5in[ifo]["event_id"][()], ifo_index[ifo])
                     for old in h5in[ifo].values():
@@ -290,6 +310,10 @@ def bin_events(inputfile, bins, outdir, filetag,
                                 compression_opts=old.compression_opts,
                             )
                             bar.update()
+                        elif isinstance(old, h5py.Group):
+                            if "search" in old.name:
+                                h5in.copy(h5in[old.name], h5out, old.name)
+                                bar.update()
             bar.close()
             if verbose:
                 print("{} written to {}".format(bin_, outf))
@@ -317,20 +341,7 @@ parser = argparse.ArgumentParser(
     description=__doc__,
 )
 
-parser.add_argument(
-    "-v",
-    "--verbose",
-    action="store_true",
-    default=False,
-    help="verbose output with microsecond timer (default: %(default)s)",
-)
-parser.add_argument(
-    "-V",
-    "--version",
-    action="version",
-    version=__version__,
-    help="show version number and exit",
-)
+add_common_pycbc_options(parser)
 
 # tags
 parser.add_argument(
@@ -374,6 +385,12 @@ parser.add_argument(
     help="The number of off source trials, default: %(default)d",
 )
 parser.add_argument(
+    "-e",
+    "--seed",
+    default=None,
+    help="Seed for the NumPy random number generator, default: %(default)s",
+)
+parser.add_argument(
     "-p",
     "--trig-start-time",
     type=int,
@@ -409,6 +426,11 @@ parser.add_argument(
     help="read in listed trigger files",
 )
 parser.add_argument(
+    "--bank-file",
+    required=True,
+    help="full template bank file for mapping hashes to ids",
+)
+parser.add_argument(
     "-o",
     "--output-dir",
     default=os.getcwd(),
@@ -423,6 +445,8 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
+
+init_logging(args.verbose)
 
 vprint = print if args.verbose else str
 
@@ -460,13 +484,33 @@ vprint("  off-source segments : [{}]".format(
     ", \n                         ".join(map(str, bins["OFFSOURCE"])),
 ))
 
-# construct off-source trial segments
-offsource = segments.segmentlist()
-_ts = args.trig_start_time
-for i in range(args.num_trials):
+# The onsource should never be the first or the last bin:
+# there should always be two segments in the offsource bins,
+# one before and one after the onsource.
+# Nevertheless, simply rely on there being at least one stretch of offsource.
+offsource_ntrials = [int(numpy.trunc(abs(b)/trialtime)) for b in bins["OFFSOURCE"]]
+
+# Seed random number generator
+numpy.random.seed(args.seed)
+
+# Randomly pick num_trials offsource trials
+offtrials = numpy.random.choice(range(sum(offsource_ntrials)), args.num_trials, replace=False)
+offtrials.sort()
+for i, j in enumerate(offtrials):
+    if j < offsource_ntrials[0]:
+        _ts = bins["OFFSOURCE"][0][0]
+    else:
+        _ts = bins["OFFSOURCE"][1][0]
+        # if the offtrial is in the second offsource segment,
+        # subtract the number of trials in the first offsource segment.
+        # This avoids the offtrials overflowing out of the offsource segments.
+        j -= offsource_ntrials[0]
+    _ts += j * trialtime
     _te = _ts + trialtime
     bins["OFFTRIAL_{}".format(i+1)] = seg = segments.segment(_ts, _te)
-    _ts = _te
+    if seg not in bins["OFFSOURCE"]:
+        raise ValueError(f"off-trial {i+1} not in off-source segments\n"
+                         f"off-trial {i+1} : {seg}\n")
     vprint("          off-trial {} : {}".format(i+1, seg))
 
 # -- read triggers ------------------------------
@@ -474,9 +518,6 @@ for i in range(args.num_trials):
 vprint("-- Merging events")
 
 if args.short_slides and args.long_slides:
-    raise NotImplementedError
-
-elif args.short_slides and not args.long_slides:
     raise NotImplementedError
 
 else:

@@ -23,13 +23,13 @@
 """ Utilities for handling frequency compressed an unequally spaced frequency
 domain waveforms.
 """
-from __future__ import absolute_import
-import lalsimulation, lal, numpy, logging, h5py
-from pycbc import pnutils, filter
+import lal, numpy, logging, h5py
+from pycbc import filter
 from scipy import interpolate
-from pycbc.types import FrequencySeries, zeros, complex_same_precision_as, real_same_precision_as
+from pycbc.types import FrequencySeries, real_same_precision_as
 from pycbc.waveform import utils
 from pycbc.scheme import schemed
+from pycbc.io.hdf import HFile
 
 def rough_time_estimate(m1, m2, flow, fudge_length=1.1, fudge_min=0.02):
     """ A very rough estimate of the duration of the waveform.
@@ -492,9 +492,6 @@ class CompressedWaveform(object):
 
     Attributes
     ----------
-    sample_points
-    amplitude
-    phase
     load_to_memory : bool
         Whether or not to load `sample_points`/`amplitude`/`phase` into memory
         the first time they are accessed, if they are hdf datasets. Can be
@@ -551,7 +548,7 @@ class CompressedWaveform(object):
                 except ValueError:
                     # this can happen if the file is closed; if so, open it
                     # and get the data
-                    fp = h5py.File(self._filenames[param], 'r')
+                    fp = HFile(self._filenames[param], 'r')
                     val = fp[self._groupnames[param]][:]
                     fp.close()
                 if self.load_to_memory:

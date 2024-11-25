@@ -1,16 +1,11 @@
-import sys
-from six.moves import range
-import pycbc
 from pycbc.fft.fftw import set_measure_level
 set_measure_level(0)
 from pycbc.filter import  matched_filter_core
-from pycbc.types import Array, TimeSeries, FrequencySeries, float32, complex64, zeros
-from pycbc.types import complex_same_precision_as,real_same_precision_as
-import pycbc.waveform
+from pycbc.types import Array, TimeSeries, FrequencySeries
 from pycbc.waveform import *
 from pycbc.vetoes import *
 import numpy as np
-from math import cos, sin, sqrt, pi, atan2, exp
+from math import cos, sin, pi, exp
 import unittest
 from utils import parse_args_all_schemes, simple_exit
 import time
@@ -117,11 +112,11 @@ class TestAutochisquare(unittest.TestCase):
 
 
         with _context:
-           dof, achisq, indices= \
+           dof, achisq = \
                autochisq_from_precomputed(snr, snr, hacor, indx, stride=3,
                                           num_points=20)
 
-        obt_snr = abs(snr[indices[1]])
+        obt_snr = abs(snr[indx[1]])
         obt_ach = achisq[1]
         self.assertTrue(obt_snr > 10.0 and obt_snr < 12.0)
         self.assertTrue(obt_ach < 3.e-3)
@@ -167,11 +162,11 @@ class TestAutochisquare(unittest.TestCase):
         snr = snr*nrm
 
         with _context:
-           dof, achisq, indices= \
+           dof, achisq = \
                autochisq_from_precomputed(snr, snr, hacor, indx, stride=3,
                                           num_points=20)
 
-        obt_snr = abs(snr[indices[1]])
+        obt_snr = abs(snr[indx[1]])
         obt_ach = achisq[1]
         self.assertTrue(obt_snr > 12.0 and obt_snr < 15.0)
         self.assertTrue(obt_ach > 6.8e3)

@@ -187,7 +187,20 @@ Here is an example of the [workflow] section of a .ini file::
 Executable locations - the [executables] section
 =================================================
 
-This section should contain the names of each of the executables that will be used in the workflow and their locations. 
+This section should contain the names of each of the executables that will be used in the workflow and their locations.  The section might look something like::
+
+  [executables]
+  tmpltbank = /full/path/to/lalapps_tmpltbank
+  inspiral = /full/path/to/lalapps_inspiral
+
+Note that one can give remote URLs here and the workflow generator will download the code to the workflow directory when it is run.
+
+One can also give a URL indicating singularity as the scheme. This will indicate that the executable will be run within a singularity container, and therefore the executables would not be directly accessible from the head node::
+
+  [executables]
+  tmpltbank = https://github.com/full/url/to/lalapps_tmpltbank
+  inspiral = singularity:///full/path/to/lalapps_inspiral
+
 
 -------------------
 executable macros
@@ -256,6 +269,26 @@ Example complete workflow .ini file
 ------------------------------------
 
 Please see individual workflow documentation pages for some examples of complete .ini files and example workflows.
+
+===========================
+Other special sections
+===========================
+
+------------------------------
+[environment] section
+------------------------------
+
+We have access to environment variables present when generating the workflow (with the exception of any variable containing a `$` or a `%` as these are special characters). These are automatically accessed and stored in the `[environment]` section of the config file when creating a PyCBC ConfigParser object.
+
+Values in this section can be accessed in the configuration file like this::
+
+  [inspiral-h1]
+  channel-name = ${environment|H1_CHANNEL_NAME}
+
+which would take the value from `${H1_CHANNEL_NAME}` in the environment.
+
+These values will also be written out for later reference in the config file produced when generating a workflow.
+
 
 ========================
 [sharedoptions] section

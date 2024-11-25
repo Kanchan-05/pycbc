@@ -31,15 +31,16 @@ import os.path
 import h5py
 from copy import copy
 import numpy as np
-from glue.ligolw import ligolw, table, lsctables, utils as ligolw_utils
+from ligo.lw import lsctables, utils as ligolw_utils
 import pycbc.waveform
 import pycbc.pnutils
 import pycbc.waveform.compress
 from pycbc import DYN_RANGE_FAC
 from pycbc.types import FrequencySeries, zeros
 import pycbc.io
-import six
+from pycbc.io.ligolw import LIGOLWContentHandler
 import hashlib
+
 
 def sigma_cached(self, psd):
     """ Cache sigma calculate for use in tandem with the FilterBank class
@@ -98,10 +99,6 @@ def sigma_cached(self, psd):
             self._sigmasq[key] = self.sigma_view.inner(psd.invsqrt[self.sslice])
     return self._sigmasq[key]
 
-# dummy class needed for loading LIGOLW files
-class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
-    pass
-lsctables.use_in(LIGOLWContentHandler)
 
 # helper function for parsing approximant strings
 def boolargs_from_apprxstr(approximant_strs):
@@ -167,6 +164,7 @@ def add_approximant_arg(parser, default=None, help=None):
                         metavar='APPRX[:COND]',
                         help=help)
 
+
 def parse_approximant_arg(approximant_arg, warray):
     """Given an approximant arg (see add_approximant_arg) and a field
     array, figures out what approximant to use for each template in the array.
@@ -203,11 +201,10 @@ def tuple_to_hash(tuple_to_be_hashed):
     int
         an integer representation of the hashed array
     """
-    if six.PY2:
-        return hash(tuple_to_be_hashed)
     h = hashlib.blake2b(np.array(tuple_to_be_hashed).tobytes('C'),
                         digest_size=8)
     return np.fromstring(h.digest(), dtype=int)[0]
+
 
 class TemplateBank(object):
     """Class to provide some basic helper functions and information
@@ -246,7 +243,6 @@ class TemplateBank(object):
         Any additional keyword arguments are stored to the `extra_args`
         attribute.
 
-
     Attributes
     ----------
     table : WaveformArray
@@ -255,12 +251,10 @@ class TemplateBank(object):
     has_compressed_waveforms : {False, bool}
         True if compressed waveforms are present in the the (hdf) file; False
         otherwise.
-    parameters : tuple
-        The parameters loaded from the input file. Same as `table.fieldnames`.
     indoc : {None, xmldoc}
         If an xml file was provided, an in-memory representation of the xml.
         Otherwise, None.
-    filehandler : {None, h5py.File}
+    filehandler : {None, pycbc.io.HFile}
         If an hdf file was provided, the file handler pointing to the hdf file
         (left open after initialization). Otherwise, None.
     extra_args : {None, dict}
@@ -274,8 +268,7 @@ class TemplateBank(object):
             self.filehandler = None
             self.indoc = ligolw_utils.load_filename(
                 filename, False, contenthandler=LIGOLWContentHandler)
-            self.table = table.get_table(
-                self.indoc, lsctables.SnglInspiralTable.tableName)
+            self.table = lsctables.SnglInspiralTable.get_table(self.indoc)
             self.table = pycbc.io.WaveformArray.from_ligolw_table(self.table,
                 columns=parameters)
 
@@ -287,9 +280,9 @@ class TemplateBank(object):
             names = tuple([n if n!= 'alpha6' else 'f_lower' for n in names])
             self.table.dtype.names = names
 
-        elif ext.endswith(('hdf', '.h5')):
+        elif ext.endswith(('hdf', '.h5', '.hdf5')):
             self.indoc = None
-            f = h5py.File(filename, 'r')
+            f = pycbc.io.HFile(filename, 'r')
             self.filehandler = f
             try:
                 fileparams = list(f.attrs['parameters'])
@@ -337,7 +330,9 @@ class TemplateBank(object):
         # (if anything was in the file)
         if approximant is not None:
             # get the approximant for each template
-            apprxs = self.parse_approximant(approximant)
+            dtype = h5py.string_dtype(encoding='utf-8')
+            apprxs = np.array(self.parse_approximant(approximant),
+                              dtype=dtype)
             if 'approximant' not in self.table.fieldnames:
                 self.table = self.table.add_fields(apprxs, 'approximant')
             else:
@@ -347,6 +342,9 @@ class TemplateBank(object):
 
     @property
     def parameters(self):
+        """tuple: The parameters loaded from the input file.
+        Same as `table.fieldnames`.
+        """
         return self.table.fieldnames
 
     def ensure_hash(self):
@@ -380,7 +378,8 @@ class TemplateBank(object):
         Parameters
         ----------
         filename : str
-            The name of the file to write to. Must end in '.hdf'.
+            The name of the file to write to. Must be a recognised HDF5
+            file extension
         start_index : If a specific slice of the template bank is to be
             written to the hdf file, this would specify the index of the
             first template in the slice
@@ -401,14 +400,14 @@ class TemplateBank(object):
 
         Returns
         -------
-        h5py.File
+        pycbc.io.HFile
             The file handler to the output hdf file (left open).
         """
-        if not filename.endswith('.hdf'):
+        if not filename.endswith(('.hdf', '.h5', '.hdf5')):
             raise ValueError("Unrecoginized file extension")
         if os.path.exists(filename) and not force:
             raise IOError("File %s already exists" %(filename))
-        f = h5py.File(filename, 'w')
+        f = pycbc.io.HFile(filename, 'w')
         parameters = self.parameters
         if skip_fields is not None:
             if not isinstance(skip_fields, list):
@@ -430,7 +429,6 @@ class TemplateBank(object):
     def end_frequency(self, index):
         """ Return the end frequency of the waveform at the given index value
         """
-        from pycbc.waveform.waveform import props
         if hasattr(self.table[index], 'f_final'):
             return self.table[index].f_final
 
@@ -475,17 +473,21 @@ class TemplateBank(object):
         tau0_temp, _ = pycbc.pnutils.mass1_mass2_to_tau0_tau3(m1, m2, fref)
         indices = []
 
+        sort = tau0_temp.argsort()
+        tau0_temp = tau0_temp[sort]
+
         for inj in injection_parameters:
             tau0_inj, _ = \
                 pycbc.pnutils.mass1_mass2_to_tau0_tau3(inj.mass1, inj.mass2,
                                                        fref)
-            inj_indices = np.where(abs(tau0_temp - tau0_inj) <= threshold)[0]
+            lid = np.searchsorted(tau0_temp, tau0_inj - threshold)
+            rid = np.searchsorted(tau0_temp, tau0_inj + threshold)
+            inj_indices = sort[lid:rid]
             indices.append(inj_indices)
-            indices_combined = np.concatenate(indices)
 
+        indices_combined = np.concatenate(indices)
         indices_unique= np.unique(indices_combined)
         self.table = self.table[indices_unique]
-
 
     def ensure_standard_filter_columns(self, low_frequency_cutoff=None):
         """ Initialize FilterBank common fields
@@ -512,6 +514,7 @@ class TemplateBank(object):
         self.min_f_lower = min(self.table['f_lower'])
         if self.f_lower is None and self.min_f_lower == 0.:
             raise ValueError('Invalid low-frequency cutoff settings')
+
 
 class LiveFilterBank(TemplateBank):
     def __init__(self, filename, sample_rate, minimum_buffer,
@@ -540,14 +543,14 @@ class LiveFilterBank(TemplateBank):
         Parameters
         ----------
         num : int
-            Proposed size of waveform in seconds
+            Proposed size of waveform in samples.
 
         Returns
         -------
         size: int
-            The rounded size to use for the waveform buffer in seconds. This
-        is calculaed using an internal `increment` attribute, which determines
-        the discreteness of the rounding.
+            The rounded size to use for the waveform buffer in samples.
+            This is calculated using an internal `increment` attribute, which
+            determines the discreteness of the rounding.
         """
         inc = self.increment
         size = np.ceil(num / self.sample_rate / inc) * self.sample_rate * inc
@@ -579,40 +582,71 @@ class LiveFilterBank(TemplateBank):
 
         return self.get_template(index)
 
-    def get_template(self, index, min_buffer=None):
+    def freq_resolution_for_template(self, index):
+        """Compute the correct resolution for a frequency series that contains
+        a given template in the bank.
+        """
+        from pycbc.waveform.waveform import props
 
+        time_duration = self.minimum_buffer
+        time_duration += 0.5
+        params = props(self.table[index])
+        params.pop('approximant')
+        approximant = self.approximant(index)
+        waveform_duration = pycbc.waveform.get_waveform_filter_length_in_time(
+            approximant, **params
+        )
+        if waveform_duration is None:
+            raise RuntimeError(
+                'Template waveform {approximant} not recognized!'
+            )
+        time_duration += waveform_duration
+        td_samples = self.round_up(time_duration * self.sample_rate)
+        return self.sample_rate / float(td_samples)
+
+    def get_template(self, index, delta_f=None):
+        """Calculate and return the frequency-domain waveform for the template
+        with the given index. The frequency resolution can optionally be given.
+
+        Parameters
+        ----------
+        index: int
+            Index of the template in the bank.
+        delta_f: float, optional
+            Resolution of the resulting frequency series. If not given, it is
+            calculated from the time duration of the template.
+
+        Returns
+        -------
+        htilde: FrequencySeries
+            Template waveform in the frequency domain.
+        """
         approximant = self.approximant(index)
         f_end = self.end_frequency(index)
         flow = self.table[index].f_lower
 
-        # Determine the length of time of the filter, rounded up to
-        # nearest power of two
-        if min_buffer is None:
-            min_buffer =  self.minimum_buffer
-        min_buffer += 0.5
+        if delta_f is None:
+            delta_f = self.freq_resolution_for_template(index)
 
-        from pycbc.waveform.waveform import props
-        p = props(self.table[index])
-        p.pop('approximant')
-        buff_size = pycbc.waveform.get_waveform_filter_length_in_time(approximant, **p)
-
-        tlen = self.round_up((buff_size + min_buffer) * self.sample_rate)
-        flen = int(tlen / 2 + 1)
-
-        delta_f = self.sample_rate / float(tlen)
+        flen = int(self.sample_rate / (2 * delta_f) + 1)
 
         if f_end is None or f_end >= (flen * delta_f):
-            f_end = (flen-1) * delta_f
+            f_end = (flen - 1) * delta_f
 
-        logging.info("Generating %s, %ss, %i, starting from %s Hz",
-                     approximant, 1.0/delta_f, index, flow)
+        logging.info(
+            "Generating %s, duration %s s, index %i, starting from %s Hz",
+            approximant,
+            1.0 / delta_f,
+            index,
+            flow
+        )
 
         # Get the waveform filter
         distance = 1.0 / DYN_RANGE_FAC
         htilde = pycbc.waveform.get_waveform_filter(
             zeros(flen, dtype=np.complex64), self.table[index],
             approximant=approximant, f_lower=flow, f_final=f_end,
-            delta_f=delta_f, delta_t=1.0/self.sample_rate, distance=distance,
+            delta_f=delta_f, delta_t=1.0 / self.sample_rate, distance=distance,
             **self.extra_args)
 
         # If available, record the total duration (which may
@@ -813,6 +847,7 @@ class FilterBank(TemplateBank):
         htilde._sigmasq = {}
         return htilde
 
+
 def find_variable_start_frequency(approximant, parameters, f_start, max_length,
                                   delta_f = 1):
     """ Find a frequency value above the starting frequency that results in a
@@ -920,3 +955,9 @@ class FilterBankSkyMax(TemplateBank):
         hcross._sigmasq = {}
 
         return hplus, hcross
+
+
+__all__ = ('sigma_cached', 'boolargs_from_apprxstr', 'add_approximant_arg',
+           'parse_approximant_arg', 'tuple_to_hash', 'TemplateBank',
+           'LiveFilterBank', 'FilterBank', 'find_variable_start_frequency',
+           'FilterBankSkyMax')

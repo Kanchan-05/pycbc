@@ -16,12 +16,15 @@
 This modules provides classes for evaluating arbitrary distributions from
 a file.
 """
-
-import h5py
+import logging
 import numpy
 import scipy.stats
+
 from pycbc.distributions import bounded
 import pycbc.transforms
+from pycbc.io.hdf import HFile
+
+logger = logging.getLogger('pycbc.distributions.arbitrary')
 
 class Arbitrary(bounded.BoundedDist):
     r"""A distribution constructed from a set of parameter values using a kde.
@@ -223,12 +226,6 @@ class FromFile(Arbitrary):
 
     Attributes
     ----------
-    name : 'fromfile'
-        The name of the distribution.
-    filename : str
-        The path to the file containing values for the parameter(s).
-    params : list
-        Parameters to read from file.
     norm : float
         The normalization of the multi-dimensional pdf.
     lognorm : float
@@ -253,6 +250,8 @@ class FromFile(Arbitrary):
 
     @property
     def filename(self):
+        """str: The path to the file containing values for the parameter(s).
+        """
         return self._filename
 
     def get_arrays_from_file(self, params_file, params=None):
@@ -272,7 +271,7 @@ class FromFile(Arbitrary):
             A dictionary of the parameters mapping `param_name -> array`.
         """
         try:
-            f = h5py.File(params_file, 'r')
+            f = HFile(params_file, 'r')
         except:
             raise ValueError('File not found.')
         if self.datagroup is not None:

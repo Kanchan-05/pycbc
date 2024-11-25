@@ -1,4 +1,5 @@
-# Copyright (C)  2016 Collin Capano, Christopher M. Biwer, Alex Nitz
+# Copyright (C)  2016  Collin Capano, Christopher M. Biwer, Alex Nitz,
+#                2021  Yifan Wang, Shichao Wu
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation; either version 3 of the License, or (at your
@@ -17,23 +18,24 @@ This modules provides classes and functions for drawing and calculating the
 probability density function of distributions.
 """
 # imports needed for functions below
-from six.moves import configparser as _ConfigParser
+import configparser as _ConfigParser
 from pycbc.distributions import constraints
 from pycbc import VARARGS_DELIM as _VARARGS_DELIM
 
 # Promote some classes/functions to the distributions name space
+from pycbc.distributions.utils import draw_samples_from_config
 from pycbc.distributions.angular import UniformAngle, SinAngle, CosAngle, \
                                         UniformSolidAngle
 from pycbc.distributions.arbitrary import Arbitrary, FromFile
 from pycbc.distributions.gaussian import Gaussian
 from pycbc.distributions.power_law import UniformPowerLaw, UniformRadius
-from pycbc.distributions.sky_location import UniformSky
+from pycbc.distributions.sky_location import UniformSky, FisherSky
 from pycbc.distributions.uniform import Uniform
 from pycbc.distributions.uniform_log import UniformLog10
 from pycbc.distributions.spins import IndependentChiPChiEff
 from pycbc.distributions.qnm import UniformF0Tau
 from pycbc.distributions.joint import JointDistribution
-from pycbc.distributions.external import External
+from pycbc.distributions.external import External, DistributionFunctionFromFile
 from pycbc.distributions.fixedsamples import FixedSamples
 from pycbc.distributions.mass import MchirpfromUniformMass1Mass2, \
                                      QfromUniformMass1Mass2
@@ -55,9 +57,11 @@ distribs = {
     UniformLog10.name : UniformLog10,
     UniformF0Tau.name : UniformF0Tau,
     External.name: External,
+    DistributionFunctionFromFile.name: DistributionFunctionFromFile,
     FixedSamples.name: FixedSamples,
     MchirpfromUniformMass1Mass2.name: MchirpfromUniformMass1Mass2,
-    QfromUniformMass1Mass2.name: QfromUniformMass1Mass2
+    QfromUniformMass1Mass2.name: QfromUniformMass1Mass2,
+    FisherSky.name: FisherSky
 }
 
 def read_distributions_from_config(cp, section="prior"):
@@ -106,8 +110,8 @@ def _convert_liststring_to_list(lstring):
 
 
 def read_params_from_config(cp, prior_section='prior',
-                            vargs_section='variable_args',
-                            sargs_section='static_args'):
+                            vargs_section='variable_params',
+                            sargs_section='static_params'):
     """Loads static and variable parameters from a configuration file.
 
     Parameters
@@ -118,10 +122,10 @@ def read_params_from_config(cp, prior_section='prior',
         Check that priors exist in the given section. Default is 'prior.'
     vargs_section : str, optional
         The section to get the parameters that will be varied/need priors
-        defined for them. Default is 'variable_args'.
+        defined for them. Default is 'variable_params'.
     sargs_section : str, optional
         The section to get the parameters that will remain fixed. Default is
-        'static_args'.
+        'static_params'.
 
     Returns
     -------
@@ -130,7 +134,7 @@ def read_params_from_config(cp, prior_section='prior',
     static_args : dict
         Dictionary of names -> values giving the parameters to keep fixed.
     """
-    # sanity check that each parameter in [variable_args] has a priors section
+    # sanity check that each parameter in [variable_params] has a prior section
     variable_args = cp.options(vargs_section)
     subsections = cp.get_subsections(prior_section)
     tags = set([p for tag in subsections for p in tag.split('+')])
@@ -171,7 +175,7 @@ def read_params_from_config(cp, prior_section='prior',
     return variable_args, static_args
 
 
-def read_constraints_from_config(cp, transforms=None,
+def read_constraints_from_config(cp, transforms=None, static_args=None,
                                  constraint_section='constraint'):
     """Loads parameter constraints from a configuration file.
 
@@ -181,6 +185,9 @@ def read_constraints_from_config(cp, transforms=None,
         An open config parser to read from.
     transforms : list, optional
         List of transforms to apply to parameters before applying constraints.
+    static_args : dict, optional
+        Dictionary of static parameters and their values to be applied
+        to constraints.
     constraint_section : str, optional
         The section to get the constraints from. Default is 'constraint'.
 
@@ -209,8 +216,8 @@ def read_constraints_from_config(cp, transforms=None,
                 except ValueError:
                     pass
             kwargs[key] = val
-        cons.append(constraints.constraints[name](constraint_arg,
-                                                  transforms=transforms,
-                                                  **kwargs))
+        cons.append(constraints.constraints[name](
+            constraint_arg, static_args=static_args, transforms=transforms,
+            **kwargs))
 
     return cons

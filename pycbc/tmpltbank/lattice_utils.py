@@ -14,11 +14,13 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from __future__ import division
+import logging
 import copy
-from six.moves import range
 import numpy
+
 import lal
+
+logger = logging.getLogger('pycbc.tmpltbank.lattice_utils')
 
 def generate_hexagonal_lattice(maxv1, minv1, maxv2, minv2, mindist):
     """

@@ -42,6 +42,24 @@ else
     echo -e "\\n\\n>> [`date`] Pre-existing template bank found"
 fi
 
+# test if there is a single fits file. If not, make a representative one
+if [[ ! -f single_significance_fits.hdf ]]
+then
+    echo -e "\\n\\n>> [`date`] Making single significance fits file"
+    python make_singles_significance_fits.py
+else
+    echo -e "\\n\\n>> [`date`] Pre-existing single significance fits file found"
+fi
+
+# test if there are fit_coeffs files for each detector.
+# If not, make some representative ones
+if [[ `ls -1 H1-fit_coeffs.hdf L1-fit_coeffs.hdf V1-fit_coeffs.hdf 2> /dev/null | wc -l` -lt 3 ]]
+then
+    echo -e "\\n\\n>> [`date`] Making fit coefficient files"
+    python make_fit_coeffs.py
+else
+    echo -e "\\n\\n>> [`date`] All needed fit coeffs files found"
+fi
 
 # test if there is a injection file.
 # If not, make one and delete any existing strain
@@ -58,7 +76,7 @@ else
 fi
 
 
-# test if strain files exist. If they dont, make them
+# test if strain files exist. If they don't, make them
 
 if [[ ! -d ./strain ]]
 then
@@ -74,17 +92,18 @@ then
             --fake-strain-seed $3 \
             --output-strain-file $out_path \
             --gps-start-time $gps_start_time \
-            --gps-end-time $gps_end_time \
+            --gps-end-time $4 \
             --sample-rate 16384 \
             --low-frequency-cutoff 10 \
             --channel-name $1:SIMULATED_STRAIN \
             --frame-duration 32 \
             --injection-file injections.hdf
     }
+    # L1 ends 32s later, so that we can inject in single-detector time
+    simulate_strain H1 aLIGOMidLowSensitivityP1200087 1234 $((gps_end_time - 32))
+    simulate_strain L1 aLIGOMidLowSensitivityP1200087 2345 $gps_end_time
+    simulate_strain V1 AdVEarlyLowSensitivityP1200087 3456 $((gps_end_time - 32))
 
-    simulate_strain H1 aLIGOMidLowSensitivityP1200087 1234
-    simulate_strain L1 aLIGOMidLowSensitivityP1200087 2345
-    simulate_strain V1 AdVEarlyLowSensitivityP1200087 3456
 else
     echo -e "\\n\\n>> [`date`] Pre-existing strain data found"
 fi
@@ -108,17 +127,19 @@ rm -rf ./output
 
 echo -e "\\n\\n>> [`date`] Running PyCBC Live"
 
+
 mpirun \
 -host localhost,localhost \
 -n 2 \
--x PYTHONPATH -x LD_LIBRARY_PATH -x OMP_NUM_THREADS -x VIRTUAL_ENV -x PATH -x HDF5_USE_FILE_LOCKING \
+--bind-to none \
+ -x PYTHONPATH -x LD_LIBRARY_PATH -x OMP_NUM_THREADS -x VIRTUAL_ENV -x PATH -x HDF5_USE_FILE_LOCKING \
 \
 python -m mpi4py `which pycbc_live` \
 --bank-file template_bank.hdf \
 --sample-rate 2048 \
 --enable-bank-start-frequency \
 --low-frequency-cutoff ${f_min} \
---max-length 256 \
+--max-length 512 \
 --approximant "SPAtmplt:mtotal<4" "SEOBNRv4_ROM:else" \
 --chisq-bins "0.72*get_freq('fSEOBNRv4Peak',params.mass1,params.mass2,params.spin1z,params.spin2z)**0.7" \
 --snr-abort-threshold 500 \
@@ -152,7 +173,7 @@ python -m mpi4py `which pycbc_live` \
     H1:strain/H1/* \
     L1:strain/L1/* \
     V1:strain/V1/* \
---frame-read-timeout 100 \
+--frame-read-timeout 10 \
 --channel-name \
     H1:SIMULATED_STRAIN \
     L1:SIMULATED_STRAIN \
@@ -164,9 +185,15 @@ python -m mpi4py `which pycbc_live` \
 --max-batch-size 16777216 \
 --output-path output \
 --day-hour-output-prefix \
---sngl-ranking newsnr_sgveto \
---ranking-statistic phasetd \
---statistic-files statHL.hdf statHV.hdf statLV.hdf \
+--sngl-ranking newsnr_sgveto_psdvar_threshold \
+--ranking-statistic phasetd_exp_fit_fgbg_norm \
+--statistic-files \
+  statHL.hdf \
+  statHV.hdf \
+  statLV.hdf \
+  H1-fit_coeffs.hdf \
+  L1-fit_coeffs.hdf \
+  V1-fit_coeffs.hdf \
 --sgchisq-snr-threshold 4 \
 --sgchisq-locations "mtotal>40:20-30,20-45,20-60,20-75,20-90,20-105,20-120" \
 --enable-background-estimation \
@@ -178,7 +205,45 @@ python -m mpi4py `which pycbc_live` \
 --round-start-time 4 \
 --start-time $gps_start_time \
 --end-time $gps_end_time \
+--src-class-mchirp-to-delta 0.01 \
+--src-class-eff-to-lum-distance 0.74899 \
+--src-class-lum-distance-to-delta -0.51557 -0.32195 \
+--run-snr-optimization \
+--snr-opt-extra-opts \
+    "--snr-opt-method differential_evolution \
+    --snr-opt-di-maxiter 50 \
+    --snr-opt-di-popsize 100 \
+    --snr-opt-include-candidate " \
+--sngl-ifar-est-dist conservative \
+--single-ranking-threshold 9 \
+--single-duration-threshold 7 \
+--single-reduced-chisq-threshold 2 \
+--single-fit-file single_significance_fits.hdf \
+--single-maximum-ifar 100 \
+--psd-variation \
 --verbose
+
+# If you would like to use the pso optimizer, change --optimizer to pso
+#  and include these arguments while removing other optimizer args.
+#  You will need to install the pyswarms package into your environment.
+# --snr-opt-extra-opts \
+#   "--snr-opt-method pso \
+#   --snr-opt-pso-iters 5 \
+#   --snr-opt-pso-particles 250 \
+#   --snr-opt-pso-c1 0.5 \
+#   --snr-opt-pso-c2 2.0 \
+#   --snr-opt-pso-w 0.01 \
+#   --snr-opt-include-candidate " \
+
+# note that, at this point, some SNR optimization processes may still be
+# running, so the checks below may ignore their results
+
+# cat the logs of pycbc_optimize_snr so we can check them
+for opt_snr_log in `find output -type f -name optimize_snr.log | sort`
+do
+    echo -e "\\n\\n>> [`date`] Showing log of SNR optimizer, ${opt_snr_log}"
+    cat ${opt_snr_log}
+done
 
 echo -e "\\n\\n>> [`date`] Checking results"
 ./check_results.py \
@@ -190,7 +255,10 @@ echo -e "\\n\\n>> [`date`] Checking results"
     --detectors H1 L1 V1
 
 echo -e "\\n\\n>> [`date`] Running Bayestar"
-for XMLFIL in `ls output/*xml*`
+for XMLFIL in `find output -type f -name \*.xml\* | sort`
 do
-    bayestar-localize-coincs --f-low ${f_min} ${XMLFIL} ${XMLFIL}
+    pushd `dirname ${XMLFIL}`
+    bayestar-localize-coincs --f-low ${f_min} `basename ${XMLFIL}` `basename ${XMLFIL}`
+    test -f 0.fits
+    popd
 done

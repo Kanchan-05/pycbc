@@ -16,10 +16,13 @@
 """
 This modules contains functions for reading in data from hdf stores
 """
-from __future__ import division
-import h5py
+import logging
 import numpy
+
 from pycbc.types import TimeSeries
+from pycbc.io.hdf import HFile
+
+logger = logging.getLogger('pycbc.frame.store')
 
 
 def read_store(fname, channel, start_time, end_time):
@@ -42,7 +45,7 @@ def read_store(fname, channel, start_time, end_time):
         Time series containing the requested data
 
     """
-    fhandle = h5py.File(fname, 'r')
+    fhandle = HFile(fname, 'r')
     if channel not in fhandle:
         raise ValueError('Could not find channel name {}'.format(channel))
 

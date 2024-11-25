@@ -12,18 +12,18 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
 # Public License for more details.
 
-from __future__ import division
 
 import sys, h5py
 import argparse, logging
 
 import copy, numpy as np
 
-from pycbc import io, events
+import pycbc
+from pycbc import events, init_logging
 from pycbc.events import triggers, trigger_fits as trstats
 from pycbc.events import stat as statsmod
 from pycbc.types.optparse import MultiDetOptionAction
-import pycbc.version
+from pycbc.io import HFile
 
 #### DEFINITIONS AND FUNCTIONS ####
 
@@ -60,10 +60,7 @@ def get_stat(statname, trigs, threshold):
 parser = argparse.ArgumentParser(usage="",
     description="Perform maximum-likelihood fits of single inspiral trigger"
                 " distributions to various functions")
-
-parser.add_argument("--version", action=pycbc.version.Version)
-parser.add_argument("-V", "--verbose", action="store_true",
-                    help="Print extra debugging information", default=False)
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument("--trigger-file",
                     help="Input hdf5 file containing single triggers. "
                     "Required")
@@ -125,6 +122,8 @@ statsmod.insert_statistic_option_group(parser,
     default_ranking_statistic='single_ranking_only')
 args = parser.parse_args()
 
+init_logging(args.verbose)
+
 args.veto_segment_name = sum(args.veto_segment_name, [])
 args.veto_file = sum(args.veto_file, [])
 
@@ -136,18 +135,12 @@ if (args.prune_param or args.prune_bins or args.prune_number) and not \
     raise RuntimeError("To prune, need to specify param, number of bins and "
                        "nonzero number to prune in each bin!")
 
-if args.verbose:
-    log_level = logging.DEBUG
-else:
-    log_level = logging.WARN
-logging.basicConfig(format='%(asctime)s : %(message)s', level=log_level)
-
 logging.info('Fitting above threshold %f' % args.stat_threshold)
 
 logging.info('Opening trigger file: %s' % args.trigger_file)
-trigf = h5py.File(args.trigger_file, 'r')
+trigf = HFile(args.trigger_file, 'r')
 logging.info('Opening template file: %s' % args.bank_file)
-templatef = h5py.File(args.bank_file, 'r')
+templatef = HFile(args.bank_file, 'r')
 
 logging.info('Counting number of triggers in each template')
 # template boundaries dataset is in order of template_id
@@ -172,12 +165,19 @@ count_in_template = count_in_template_hashorder[tid_sort]
 # get the stat values
 logging.info('Calculating stat values')
 abovethresh, stat = get_stat(args, trigf[args.ifo], args.stat_threshold)
+logging.info('%i trigs left after thresholding' % len(stat))
 
 tid = trigf[args.ifo + '/template_id'][abovethresh]
 time = trigf[args.ifo + '/end_time'][abovethresh]
 if args.save_trig_param:
-    tparam = trigf[args.ifo + '/' + args.save_trig_param][abovethresh]
-logging.info('%i trigs left after thresholding' % len(stat))
+    tparam_region = trigf[args.ifo][args.save_trig_param + '_template'][:]
+    tparam = []
+    for region in tparam_region:
+        try:
+            tparam.append(trigf[args.ifo][args.save_trig_param][region][0])
+        except IndexError:
+            # Should only happen if there are no triggers in the template
+            tparam.append(np.nan)
 
 # Calculate total time being analysed from segments
 # use set() to eliminate duplicates
@@ -195,11 +195,9 @@ for veto_file, veto_segment_name in zip(args.veto_file, args.veto_segment_name):
     stat = stat[retain]
     tid = tid[retain]
     time = time[retain]
-    if args.save_trig_param:
-        tparam = tparam[retain]
     logging.info('%i trigs left after vetoing with %s' %
                                                        (len(stat), veto_file))
-#now include gating veto
+# Include gating vetoes
 if args.gating_veto_windows:
     gating_veto = args.gating_veto_windows[args.ifo].split(',')
     gveto_before = float(gating_veto[0])
@@ -208,7 +206,12 @@ if args.gating_veto_windows:
         raise ValueError("Gating veto window values must be negative before "
                          "gates and positive after gates.")
     if not (gveto_before == 0 and gveto_after == 0):
-        gate_times = np.unique(trigf[args.ifo + '/gating/auto/time'][:])
+        autogate_times = np.unique(trigf[args.ifo + '/gating/auto/time'][:])
+        if args.ifo + '/gating/file' in trigf:
+            detgate_times = trigf[args.ifo + '/gating/file/time'][:]
+        else:
+            detgate_times = []
+        gate_times = np.concatenate((autogate_times, detgate_times))
         gveto_segs = events.veto.start_end_to_segments(gate_times + gveto_before,
                                                        gate_times + gveto_after).coalesce()
         all_segments -= gveto_segs
@@ -218,8 +221,6 @@ if args.gating_veto_windows:
         stat = stat[gveto_retain_idx]
         tid = tid[gveto_retain_idx]
         time = time[gveto_retain_idx]
-        if args.save_trig_param:
-            tparam = tparam[gveto_retain_idx]
         logging.info('%i trigs left after vetoing triggers near gates' % len(stat))
 
 total_time = abs(all_segments)
@@ -289,8 +290,6 @@ if args.prune_param:
             logging.info('%i trigs remain' % len(stat))
             tid = tid[retain]
             time = time[retain]
-            if args.save_trig_param:
-                tparam = tparam[retain]
             # also for the reference trig arrays
             retain = abs(timepruneall - ltime) > args.prune_window
             statpruneall = statpruneall[retain]
@@ -344,9 +343,7 @@ for j, tnum in enumerate(trange):
     counts_total.append(count_total)
     fits.append(alpha)
     if args.save_trig_param:
-        # save the param value of the first trig in this template
-        param_in_template = tparam[tid == tnum]
-        tpars.append(param_in_template[0])
+        tpars.append(tparam[tnum])
     if (tnum % 1000 == 0): logging.info('Fitted template %i / %i' %
                                                     (tnum - tmin, tmax - tmin))
 
@@ -355,9 +352,12 @@ sigma_regions = trigf[args.ifo + '/sigmasq_template'][:]
 median_sigma = []
 for reg in sigma_regions:
     strigs = trigf[args.ifo + '/sigmasq'][reg]
+    if len(strigs) == 0:
+        median_sigma.append(np.nan)
+        continue
     median_sigma.append(np.median(strigs) ** 0.5)
 
-outfile = h5py.File(args.output, 'w')
+outfile = HFile(args.output, 'w')
 outfile.create_dataset("template_id", data=trange)
 outfile.create_dataset("count_above_thresh", data=counts_above)
 outfile.create_dataset("fit_coeff", data=fits)
@@ -365,7 +365,7 @@ if args.save_trig_param:
     outfile.create_dataset("template_param", data=tpars)
 outfile.create_dataset("count_in_template", data=counts_total)
 outfile.create_dataset("median_sigma", data=median_sigma)
-# add some metadata
+# Add some metadata
 outfile.attrs.create("ifo", data=args.ifo.encode())
 outfile.attrs.create("fit_function", data=args.fit_function.encode())
 outfile.attrs.create("sngl_stat", data=args.sngl_ranking)

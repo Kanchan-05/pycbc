@@ -5,11 +5,13 @@ import sys
 import argparse
 import h5py
 import numpy
-import matplotlib; matplotlib.use('Agg')
+import matplotlib
+matplotlib.use('Agg')
 import pylab
 import inspect
-import pycbc.events, pycbc.version, pycbc.results, pycbc.pnutils
 from itertools import cycle
+
+import pycbc.events, pycbc.pnutils, pycbc.conversions, pycbc.results
 
 
 class H5BankFile(h5py.File):
@@ -54,6 +56,11 @@ class H5BankFile(h5py.File):
         'Mass ratio'
         return self.mass1_param() / self.mass2_param()
 
+    def eta_param(self):
+        'Symmetric mass ratio'
+        return pycbc.conversions.eta_from_mass1_mass2(
+                self.mass1_param(), self.mass2_param())
+
     def effective_spin_param(self):
         'Effective spin z-component'
         return (self.spin1z_param() * self.mass1_param() + self.spin2z_param() * self.mass2_param()) / self.total_mass_param()
@@ -70,13 +77,15 @@ class H5BankFile(h5py.File):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', action='version', version=pycbc.version.git_verbose_msg)
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument('--bank-file', help='hdf format template bank file',
                     required=True)
-parser.add_argument('--background-bins', nargs='+', help='list of background bin format strings')
+parser.add_argument('--background-bins', nargs='+',
+                    help='list of background bin format strings')
 parser.add_argument('--f-lower', type=float,
-                    help="Lower frequency cutoff for evaluating template duration. Should"
-                         " be equal to the lower cutoff used in inspiral jobs")
+                    help="Lower frequency cutoff for evaluating template "
+                         "duration. Should be equal to the lower cutoff "
+                         "used in inspiral jobs")
 parser.add_argument('--output-file', help='output file', required=True)
 parser.add_argument('--x-var', type=str, choices=H5BankFile.get_param_names(),
                     default='mass1',
@@ -90,13 +99,15 @@ parser.add_argument('--log-y', action='store_true',
                     help='Make y-axis logarithmic')
 args = parser.parse_args()
 
+pycbc.init_logging(args.verbose)
+
 bank = H5BankFile(args.bank_file, 'r')
-bank.f_lower = args.f_lower
+f_lower = args.f_lower or bank['f_lower'][:]
 
 if args.background_bins:
     data = {'mass1': bank['mass1'][:], 'mass2': bank['mass2'][:],
             'spin1z': bank['spin1z'][:], 'spin2z': bank['spin2z'][:],
-            'f_lower': args.f_lower}
+            'f_lower': f_lower}
     locs_dict = pycbc.events.background_bin_from_string(args.background_bins, data)
 else:
     locs_dict = {'Template Bank': numpy.arange(0, len(bank), 1)}

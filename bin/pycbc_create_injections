@@ -108,12 +108,15 @@ along with any numpy ufunc. So, in the above example, mass ratio (q) is
 constrained to be <= 4 by using a function from the conversions module.
 """
 
-import os, sys
+import os
+import sys
 import argparse
 import logging
 import numpy
+import h5py
+from numpy.random import uniform
+
 import pycbc
-import pycbc.version
 from pycbc.inject import InjectionSet
 from pycbc import distributions
 from pycbc import transforms
@@ -122,15 +125,11 @@ from pycbc.io import record
 from pycbc.waveform import parameters
 from pycbc.workflow import configuration
 from pycbc.workflow import WorkflowConfigParser
-from numpy.random import uniform
-import h5py
 
 parser = argparse.ArgumentParser(description=__doc__,
             formatter_class=argparse.RawDescriptionHelpFormatter)
 configuration.add_workflow_command_line_group(parser)
-parser.add_argument('--version', action='version',
-                    version=pycbc.version.git_verbose_msg,
-                    help='Prints version information.')
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument('--ninjections', type=int,
                     help='Number of injections to create.')
 parser.add_argument('--gps-start-time', type=int, help="Alternative to "
@@ -163,8 +162,6 @@ parser.add_argument('--static-params-section', default="static_params",
 parser.add_argument("--force", action="store_true", default=False,
                     help="If the output-file already exists, overwrite it. "
                          "Otherwise, an OSError is raised.")
-parser.add_argument("--verbose", action="store_true", default=False,
-                    help="Print logging messages.")
 opts = parser.parse_args()
 
 pycbc.init_logging(opts.verbose)
@@ -190,7 +187,8 @@ variable_params, static_params = distributions.read_params_from_config(cp,
     prior_section=opts.dist_section,
     vargs_section=opts.variable_params_section,
     sargs_section=opts.static_params_section)
-constraints = distributions.read_constraints_from_config(cp)
+constraints = distributions.read_constraints_from_config(
+    cp, static_args=static_params)
 
 if any(cp.get_subsections('waveform_transforms')):
     waveform_transforms = transforms.read_transforms_from_config(cp,
@@ -205,7 +203,7 @@ dists = distributions.read_distributions_from_config(cp, opts.dist_section)
 
 # construct class that will draw the samples
 randomsampler = JointDistribution(variable_params, *dists,
-                               **{"constraints" : constraints})
+                               **{"constraints": constraints})
 
 if opts.ninjections:
     draw_size = opts.ninjections
@@ -238,7 +236,7 @@ while True:
         if old_samples is None:
             tstart = opts.gps_start_time
         else:
-            tstart = old_samples['tc'].max()
+            tstart = old_samples['tc'].max() + opts.time_step
 
         tc = numpy.arange(0, draw_size) * opts.time_step + tstart
         tc += uniform(0, high=opts.time_window, size=draw_size).cumsum()

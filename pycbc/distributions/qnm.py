@@ -13,12 +13,16 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-
+import logging
 import re
 import numpy
+
 import pycbc
 from pycbc import conversions, boundaries
+
 from . import uniform, bounded
+
+logger = logging.getLogger('pycbc.distributions.qnm')
 
 
 class UniformF0Tau(uniform.Uniform):
@@ -155,12 +159,11 @@ class UniformF0Tau(uniform.Uniform):
             l, m = 2, 2
         # temporarily silence invalid warnings... these will just be ruled out
         # automatically
-        orig = numpy.seterr(invalid='ignore')
-        mf = conversions.final_mass_from_f0_tau(f0, tau, l=l, m=m)
-        sf = conversions.final_spin_from_f0_tau(f0, tau, l=l, m=m)
-        isin = (self.final_mass_bounds.__contains__(mf)) & (
-                self.final_spin_bounds.__contains__(sf))
-        numpy.seterr(**orig)
+        with numpy.errstate(invalid="ignore"):
+            mf = conversions.final_mass_from_f0_tau(f0, tau, l=l, m=m)
+            sf = conversions.final_spin_from_f0_tau(f0, tau, l=l, m=m)
+            isin = (self.final_mass_bounds.__contains__(mf)) & (
+                    self.final_spin_bounds.__contains__(sf))
         return isin
 
     def rvs(self, size=1):

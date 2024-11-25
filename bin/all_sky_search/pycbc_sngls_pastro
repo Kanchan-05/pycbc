@@ -12,20 +12,16 @@ coincidences.
 
 import pycbc, pycbc.io, copy
 import argparse, logging, numpy as np
-from glue.ligolw import ligolw, table, lsctables, utils as ligolw_utils
+from ligo.lw import lsctables, utils as ligolw_utils
 from pycbc import conversions as conv
 from pycbc.events import veto, stat, ranking, coinc, single as sngl
+from pycbc.io.ligolw import LIGOLWContentHandler
 from ligo.segments import segment, segmentlist
-import pycbc.version
 import matplotlib
 matplotlib.use('agg')
 from matplotlib import pyplot as plt
 from scipy.stats import gaussian_kde as gk
 
-# dummy class for loading LIGOLW files
-class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
-    pass
-lsctables.use_in(LIGOLWContentHandler)
 
 d_power = {
     'log': 3.,
@@ -42,9 +38,7 @@ mchirp_power = {
 }
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--verbose", action='count')
-parser.add_argument("--version", action='version',
-                    version=pycbc.version.git_verbose_msg)
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument("--single-statmap-files", nargs='+', required=True,
                     help="Single statmap files for which p_astro is "
                          "calculated.")
@@ -222,7 +216,7 @@ for inj_filename, inj_trigger_filename in zip(args.inj_files,
     logging.info('Reading injection file')
     indoc = ligolw_utils.load_filename(inj_filename, False,
                                        contenthandler=LIGOLWContentHandler)
-    sim_table = table.get_table(indoc, lsctables.SimInspiralTable.tableName)
+    sim_table = lsctables.SimInspiralTable.get_table(indoc)
     inj_time = np.array(sim_table.get_column('geocent_end_time') +
                         1e-9 * sim_table.get_column('geocent_end_time_ns'),
                         dtype=np.float64)

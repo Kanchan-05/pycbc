@@ -5,23 +5,20 @@ import argparse
 import glob
 import logging as log
 import numpy as np
-import h5py
 import pycbc
-from pycbc.io import FieldArray
-from glue.ligolw import utils as ligolw_utils
-from glue.ligolw import ligolw, lsctables
-
-
-# dummy class needed for loading LIGOLW files
-class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
-    pass
+from pycbc.io import FieldArray, HFile
+from pycbc.io.ligolw import LIGOLWContentHandler
+from ligo.lw.utils import load_filename as load_xml_doc
+from ligo.lw import lsctables
+from pycbc import conversions as conv
+from ligo.skymap.io import LigoLWEventSource
 
 def close(a, b, c):
     return abs(a - b) <= c
 
 def check_single_results(args):
     single_fail = False
-    with h5py.File(args.bank, 'r') as bankf:
+    with HFile(args.bank, 'r') as bankf:
         temp_mass1 = bankf['mass1'][:]
         temp_mass2 = bankf['mass2'][:]
         temp_s1z = bankf['spin1z'][:]
@@ -32,7 +29,7 @@ def check_single_results(args):
 
     trig_paths = sorted(glob.glob('output/????_??_??/*.hdf'))
     for trigfp in trig_paths:
-        with h5py.File(trigfp, 'r') as trigf:
+        with HFile(trigfp, 'r') as trigf:
             for detector in detectors:
                 if detector not in trigf:
                     continue
@@ -42,7 +39,7 @@ def check_single_results(args):
                     continue
 
                 # check that PSD is sane
-                psd = group['psd'][:] / pycbc.DYN_RANGE_FAC ** 2
+                psd = group['psd'][:].astype(np.float64) / pycbc.DYN_RANGE_FAC ** 2
                 psd_df = group['psd'].attrs['delta_f']
                 psd_f = np.arange(len(psd)) * psd_df
                 psd_epoch = group['psd'].attrs['epoch']
@@ -107,56 +104,69 @@ def check_single_results(args):
     return single_fail
 
 
-def check_coinc_results(args):
-    coinc_fail = False
-    # gather coincident triggers
-    coinc_trig_paths = sorted(glob.glob('output/coinc*.xml.gz'))
-    n_coincs = len(coinc_trig_paths)
-    if n_coincs == 0:
-        log.error('No coincident triggers detected')
-        coinc_fail = True
-    elif n_coincs >= 10:
-        log.error('Too many coincident triggers detected')
-        coinc_fail = True
-    else:
-        log.info('%d coincident trigger(s) detected', n_coincs)
+def check_found_events(args):
+    found_fail = False
 
-    with h5py.File(args.injections, 'r') as injfile:
+    # read injections
+    with HFile(args.injections, 'r') as injfile:
         inj_mass1 = injfile['mass1'][:]
         inj_mass2 = injfile['mass2'][:]
         inj_spin1z = injfile['spin1z'][:]
         inj_spin2z = injfile['spin2z'][:]
         inj_time = injfile['tc'][:]
 
-    if len(inj_mass1) > n_coincs:
-        log.error('More injections than coincident triggers')
-        coinc_fail = True
+    # gather found triggers
+    found_trig_paths = sorted(glob.glob('output/????_??_??/candidate_*/*.xml.gz'))
+    n_found = len(found_trig_paths)
+    if n_found == 0:
+        log.error('No triggers detected')
+        found_fail = True
+    elif n_found >= 10:
+        log.error('Too many triggers detected')
+        found_fail = True
+    else:
+        log.info('%d found trigger(s) detected', n_found)
 
     # create field array to store properties of triggers
     dtype = [('mass1', float), ('mass2', float),
              ('spin1z', float), ('spin2z', float),
-             ('tc', float), ('net_snr', float)]
-    trig_props = FieldArray(n_coincs, dtype=dtype)
+             ('tc', float), ('net_snr', float),
+             ('ifar', float)]
+    trig_props = FieldArray(n_found, dtype=dtype)
 
-    # store properties of coincident triggers
-    for x, ctrigfp in enumerate(coinc_trig_paths):
+    # store properties of found triggers
+    for x, ctrigfp in enumerate(found_trig_paths):
         log.info('Checking trigger %s', ctrigfp)
-        xmldoc = ligolw_utils.load_filename(
+        xmldoc = load_xml_doc(
             ctrigfp, False, contenthandler=LIGOLWContentHandler)
-        sngl_inspiral_table = lsctables.SnglInspiralTable.get_table(xmldoc)
+        si_table = lsctables.SnglInspiralTable.get_table(xmldoc)
+        ci_table = lsctables.CoincInspiralTable.get_table(xmldoc)
 
-        trig_props['tc'][x] = sngl_inspiral_table.get_column('end_time')[0]
-        trig_props['mass1'][x] = sngl_inspiral_table.get_column('mass1')[0]
-        trig_props['mass2'][x] = sngl_inspiral_table.get_column('mass2')[0]
-        trig_props['spin1z'][x] = sngl_inspiral_table.get_column('spin1z')[0]
-        trig_props['spin2z'][x] = sngl_inspiral_table.get_column('spin2z')[0]
+        #check the PSD of the XML file
+        event, = LigoLWEventSource(ctrigfp, psd_file=ctrigfp, coinc_def=None).values()
+        for entry in event.singles:
+            psd = entry.psd.data.data
+            if (psd < 1e-48).any() \
+                    or (psd > 1e-40).any() \
+                    or not np.isfinite(psd).all() :
+                log.error('Invalid PSD in %s', ctrigfp)
+                found_fail = True
 
-        snr_list = sngl_inspiral_table.get_column('snr')
+
+        trig_props['tc'][x] = si_table[0].end
+        trig_props['mass1'][x] = si_table[0].mass1
+        trig_props['mass2'][x] = si_table[0].mass2
+        trig_props['spin1z'][x] = si_table[0].spin1z
+        trig_props['spin2z'][x] = si_table[0].spin2z
+        trig_props['ifar'][x] = conv.sec_to_year(1 / ci_table[0].combined_far)
+
+        snr_list = si_table.getColumnByName('snr').asarray()
         trig_props['net_snr'][x] = sum(snr_list ** 2) ** 0.5
 
-        log.info('IFO SNRs: %s', snr_list)
+        log.info('Single-detector SNRs: %s', snr_list)
         log.info('Network SNR: %f', trig_props['net_snr'][x])
-        log.info('IFO End Time: %f', trig_props['tc'][x])
+        log.info('IFAR: %f', trig_props['ifar'][x])
+        log.info('Merger time: %f', trig_props['tc'][x])
         log.info('Mass 1: %f', trig_props['mass1'][x])
         log.info('Mass 2: %f', trig_props['mass2'][x])
         log.info('Spin1z: %f', trig_props['spin1z'][x])
@@ -165,28 +175,29 @@ def check_coinc_results(args):
     # check if injections match trigger params
     for i in range(len(inj_mass1)):
         has_match = False
-        for j in range(n_coincs):
+        for j in range(n_found):
             # FIXME should calculate the optimal SNRs of the injections
             # and use those for checking net_snr
             if (close(inj_time[i], trig_props['tc'][j], 1.0)
-                    and close(inj_mass1[i], trig_props['mass1'][j], 5e-7)
-                    and close(inj_mass2[i], trig_props['mass2'][j], 5e-7)
-                    and close(inj_spin1z[i], trig_props['spin1z'][j], 5e-7)
-                    and close(inj_spin2z[i], trig_props['spin2z'][j], 5e-7)
+                    and close(inj_mass1[i], trig_props['mass1'][j], 1e-5)
+                    and close(inj_mass2[i], trig_props['mass2'][j], 1e-5)
+                    and close(inj_spin1z[i], trig_props['spin1z'][j], 1e-5)
+                    and close(inj_spin2z[i], trig_props['spin2z'][j], 1e-5)
                     and close(15.0, trig_props['net_snr'][j], 2.0)):
                 has_match = True
                 break
 
         if not has_match:
-            coinc_fail = True
-            log.error('Injection %i has no match', i)
+            found_fail = True
+            log.error('Injection %i was missed', i)
 
-    if coinc_fail:
-        log.error('Coincident Trigger Test Failed')
-    return coinc_fail
+    if found_fail:
+        log.error('Found Trigger Test Failed')
+    return found_fail
 
 
 parser = argparse.ArgumentParser()
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument('--gps-start', type=float, required=True)
 parser.add_argument('--gps-end', type=float, required=True)
 parser.add_argument('--f-min', type=float, required=True)
@@ -195,13 +206,11 @@ parser.add_argument('--injections', type=str, required=True)
 parser.add_argument('--detectors', type=str, required=True, nargs='+')
 args = parser.parse_args()
 
-log.basicConfig(level=log.INFO, format='%(asctime)s %(message)s')
-
-lsctables.use_in(LIGOLWContentHandler)
+pycbc.init_logging(args.verbose, default_level=1)
 
 single_fail = check_single_results(args)
-coinc_fail = check_coinc_results(args)
-fail = single_fail or coinc_fail
+found_fail = check_found_events(args)
+fail = single_fail or found_fail
 
 if fail:
     log.error('Test Failed')

@@ -16,19 +16,19 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+
 import argparse
 import logging
 import numpy
-import os, sys
-from glue.ligolw import ligolw, lsctables, table, utils
+import os
+import sys
+
+from pycbc import add_common_pycbc_options, init_logging
 from pycbc.inject import InjectionSet, legacy_approximant_name
 from pycbc.types import TimeSeries
 from pycbc.waveform import get_td_waveform
 from pycbc.detector import get_available_detectors
 
-class DefaultContentHandler(ligolw.LIGOLWContentHandler):
-    pass
-lsctables.use_in(DefaultContentHandler)
 
 # command line usage
 parser = argparse.ArgumentParser(
@@ -45,6 +45,8 @@ parser = argparse.ArgumentParser(
              from the sim_inspiral row, Y is the GPS start time of the ASCII waveform file, \
              and Z is the duration of the file in seconds.')
 
+add_common_pycbc_options(parser)
+
 # add command line options
 parser.add_argument('--injection-file', type=str, required=True,
              help='Path to the LIGOLW XML file that contains a sim_inspiral table.')
@@ -53,14 +55,13 @@ parser.add_argument('--sample-rate', type=int, required=True,
 parser.add_argument("--tag", type=str, default='hwinjcbcsimid',
                     help="Prefix added to output filenames.")
 parser.add_argument('--ifos', nargs='+', default=['H1', 'L1'], required=True,
-                    choices=list(zip(*get_available_detectors()))[0],
+                    choices=get_available_detectors(),
                     help='List of IFOs to generate injections for.')
 # parse command line
 opts = parser.parse_args()
 
-# setup log
-logging_level = logging.DEBUG
-logging.basicConfig(format='%(asctime)s : %(message)s', level=logging_level)
+# Default logging level is debug: --verbose adds to this
+init_logging(args.verbose, default_level=2)
 
 # read in injection LIGOLW XML file
 logging.info('Reading injection file')
@@ -97,18 +98,25 @@ for sim in injections.table:
 
         # create a time series of zeroes to inject waveform into
         initial_array = numpy.zeros(num_samples, dtype=h_plus.dtype)
-        output = TimeSeries(initial_array, delta_t=1.0/opts.sample_rate, epoch=start_time, dtype=h_plus.dtype)
+        output = TimeSeries(
+            initial_array,
+            delta_t=1.0/opts.sample_rate,
+            epoch=start_time,
+            dtype=h_plus.dtype)
 
         # inject waveform into time series of zeroes
         logging.info('Injecting %s waveform into timeseries of zeroes', ifo)
         injections.apply(output, ifo, simulation_ids=[sim.simulation_id])
 
         # set output filename
-        txt_filename = opts.tag + str(sim_id) + '_' + str(start_time) + '_' + ifo + '.txt'
+        txt_filename = f'{opts.tag}{sim_id:d}_{start_time:d}_{ifo}.txt'
 
         # check if filename does not exist
         if os.path.exists(txt_filename):
-            logging.warn('Filename %s already exists and will not be overwritten', txt_filename)
+            logging.warning(
+                'Filename %s already exists and will not be overwritten',
+                txt_filename
+            )
             sys.exit()
 
         # save waveform as single column ASCII for awgstream to use

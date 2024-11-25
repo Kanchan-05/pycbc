@@ -17,8 +17,6 @@
 """I/O utilities for pycbc inference
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
 
 import os
 import argparse
@@ -39,6 +37,8 @@ from .cpnest import CPNestFile
 from .multinest import MultinestFile
 from .dynesty import DynestyFile
 from .ultranest import UltranestFile
+from .snowline import SnowlineFile
+from .nessai import NessaiFile
 from .posterior import PosteriorFile
 from .txt import InferenceTXTFile
 
@@ -51,6 +51,8 @@ filetypes = {
     DynestyFile.name: DynestyFile,
     PosteriorFile.name: PosteriorFile,
     UltranestFile.name: UltranestFile,
+    NessaiFile.name: NessaiFile,
+    SnowlineFile.name: SnowlineFile,
 }
 
 try:
@@ -703,7 +705,6 @@ def results_from_cli(opts, load_samples=True, **kwargs):
             # read samples from file
             samples = fp.samples_from_cli(opts, parameters=opts.parameters,
                                           **kwargs)
-
             logging.info("Loaded {} samples".format(samples.size))
 
             if input_file in constraints:

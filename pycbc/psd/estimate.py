@@ -16,12 +16,21 @@
 """Utilites to estimate PSDs from data.
 """
 
-from six.moves import range
-
 import numpy
 from pycbc.types import Array, FrequencySeries, TimeSeries, zeros
 from pycbc.types import real_same_precision_as, complex_same_precision_as
 from pycbc.fft import fft, ifft
+
+# Change to True in front-end if you want this function to use caching
+# This is a mostly-hidden optimization option that most users will not want
+# to use. It is used in PyCBC Live
+USE_CACHING_FOR_WELCH_FFTS = False
+USE_CACHING_FOR_INV_SPEC_TRUNC = False
+# If using caching we want output to be unique if called at different places
+# (and if called from different modules/functions), these unique IDs acheive
+# that. The numbers are not significant, only that they are unique.
+WELCH_UNIQUE_ID = 438716587
+INVSPECTRUNC_UNIQUE_ID = 100257896
 
 def median_bias(n):
     """Calculate the bias of the median average PSD computed from `n` segments.
@@ -88,6 +97,8 @@ def welch(timeseries, seg_len=4096, seg_stride=2048, window='hann',
     -----
     See arXiv:gr-qc/0509116 for details.
     """
+    from pycbc.strain.strain import execute_cached_fft
+
     window_map = {
         'hann': numpy.hanning
     }
@@ -143,11 +154,12 @@ def welch(timeseries, seg_len=4096, seg_stride=2048, window='hann',
 
     # calculate psd of each segment
     delta_f = 1. / timeseries.delta_t / seg_len
-    segment_tilde = FrequencySeries(
-        numpy.zeros(int(seg_len / 2 + 1)),
-        delta_f=delta_f,
-        dtype=fs_dtype,
-    )
+    if not USE_CACHING_FOR_WELCH_FFTS:
+        segment_tilde = FrequencySeries(
+            numpy.zeros(int(seg_len / 2 + 1)),
+            delta_f=delta_f,
+            dtype=fs_dtype,
+        )
 
     segment_psds = []
     for i in range(num_segments):
@@ -155,7 +167,11 @@ def welch(timeseries, seg_len=4096, seg_stride=2048, window='hann',
         segment_end = segment_start + seg_len
         segment = timeseries[segment_start:segment_end]
         assert len(segment) == seg_len
-        fft(segment * w, segment_tilde)
+        if not USE_CACHING_FOR_WELCH_FFTS:
+            fft(segment * w, segment_tilde)
+        else:
+            segment_tilde = execute_cached_fft(segment * w,
+                                               uid=WELCH_UNIQUE_ID)
         seg_psd = abs(segment_tilde * segment_tilde.conj()).numpy()
 
         #halve the DC and Nyquist components to be consistent with TO10095
@@ -215,6 +231,8 @@ def inverse_spectrum_truncation(psd, max_filter_len, low_frequency_cutoff=None, 
     -----
     See arXiv:gr-qc/0509116 for details.
     """
+    from pycbc.strain.strain import execute_cached_fft, execute_cached_ifft
+
     # sanity checks
     if type(max_filter_len) is not int or max_filter_len <= 0:
         raise ValueError('max_filter_len must be a positive integer')
@@ -233,9 +251,16 @@ def inverse_spectrum_truncation(psd, max_filter_len, low_frequency_cutoff=None, 
         kmin = int(low_frequency_cutoff / psd.delta_f)
 
     inv_asd[kmin:N//2] = (1.0 / psd[kmin:N//2]) ** 0.5
-    q = TimeSeries(numpy.zeros(N), delta_t=(N / psd.delta_f), \
-        dtype=real_same_precision_as(psd))
-    ifft(inv_asd, q)
+    if not USE_CACHING_FOR_INV_SPEC_TRUNC:
+        q = TimeSeries(
+            numpy.zeros(N),
+            delta_t=(N / psd.delta_f),
+            dtype=real_same_precision_as(psd)
+        )
+        ifft(inv_asd, q)
+    else:
+        q = execute_cached_ifft(inv_asd, copy_output=False,
+                                uid=INVSPECTRUNC_UNIQUE_ID)
 
     trunc_start = max_filter_len // 2
     trunc_end = N - max_filter_len // 2
@@ -249,15 +274,22 @@ def inverse_spectrum_truncation(psd, max_filter_len, low_frequency_cutoff=None, 
 
     if trunc_start < trunc_end:
         q[trunc_start:trunc_end] = 0
-    psd_trunc = FrequencySeries(numpy.zeros(len(psd)), delta_f=psd.delta_f, \
-                                dtype=complex_same_precision_as(psd))
-    fft(q, psd_trunc)
+    if not USE_CACHING_FOR_INV_SPEC_TRUNC:
+        psd_trunc = FrequencySeries(
+            numpy.zeros(len(psd)),
+            delta_f=psd.delta_f,
+            dtype=complex_same_precision_as(psd)
+        )
+        fft(q, psd_trunc)
+    else:
+        psd_trunc = execute_cached_fft(q, copy_output=False,
+                                       uid=INVSPECTRUNC_UNIQUE_ID)
     psd_trunc *= psd_trunc.conj()
     psd_out = 1. / abs(psd_trunc)
 
     return psd_out
 
-def interpolate(series, delta_f):
+def interpolate(series, delta_f, length=None):
     """Return a new PSD that has been interpolated to the desired delta_f.
 
     Parameters
@@ -266,13 +298,21 @@ def interpolate(series, delta_f):
         Frequency series to be interpolated.
     delta_f : float
         The desired delta_f of the output
+    length : None or int
+        The desired number of frequency samples. The default is None,
+        so it will be calculated from the given `series` and `delta_f`.
+        But this will cause an inconsistency issue of length sometimes,
+        so if `length` is given, then just use it.
 
     Returns
     -------
     interpolated series : FrequencySeries
         A new FrequencySeries that has been interpolated.
     """
-    new_n = (len(series)-1) * series.delta_f / delta_f + 1
+    if length is None:
+        new_n = (len(series)-1) * series.delta_f / delta_f + 1
+    else:
+        new_n = length
     samples = numpy.arange(0, numpy.rint(new_n)) * delta_f
     interpolated_series = numpy.interp(samples, series.sample_frequencies.numpy(), series.numpy())
     return FrequencySeries(interpolated_series, epoch=series.epoch,

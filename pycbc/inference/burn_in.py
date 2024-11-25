@@ -26,15 +26,15 @@ This modules provides classes and functions for determining when Markov Chains
 have burned in.
 """
 
-from __future__ import division
 
 import logging
 from abc import ABCMeta, abstractmethod
-from six import add_metaclass
 import numpy
 from scipy.stats import ks_2samp
 
 from pycbc.io.record import get_vars_from_arg
+
+logger = logging.getLogger('pycbc.inference.burn_in')
 
 # The value to use for a burn-in iteration if a chain is not burned in
 NOT_BURNED_IN_ITER = -1
@@ -246,9 +246,9 @@ def evaluate_tests(burn_in_test, test_is_burned_in, test_burn_in_iter):
 #
 
 
-@add_metaclass(ABCMeta)
-class BaseBurnInTests(object):
+class BaseBurnInTests(metaclass=ABCMeta):
     """Base class for burn in tests."""
+
     available_tests = ('halfchain', 'min_iterations', 'max_posterior',
                        'posterior_step', 'nacl',
                        )
@@ -550,7 +550,7 @@ class MCMCBurnInTests(BaseBurnInTests):
         """Runs all of the burn-in tests."""
         # evaluate all the tests
         for tst in self.do_tests:
-            logging.info("Evaluating %s burn-in test", tst)
+            logger.info("Evaluating %s burn-in test", tst)
             getattr(self, tst)(filename)
         # evaluate each chain at a time
         for ci in range(self.nchains):
@@ -564,8 +564,8 @@ class MCMCBurnInTests(BaseBurnInTests):
                                                         tibi, tbi)
             self.is_burned_in[ci] = is_burned_in
             self.burn_in_iteration[ci] = burn_in_iter
-        logging.info("Number of chains burned in: %i of %i",
-                     self.is_burned_in.sum(), self.nchains)
+        logger.info("Number of chains burned in: %i of %i",
+                    self.is_burned_in.sum(), self.nchains)
 
     def write(self, fp, path=None):
         """Writes burn-in info to an open HDF file.
@@ -733,17 +733,17 @@ class EnsembleMCMCBurnInTests(BaseBurnInTests):
         """Runs all of the burn-in tests."""
         # evaluate all the tests
         for tst in self.do_tests:
-            logging.info("Evaluating %s burn-in test", tst)
+            logger.info("Evaluating %s burn-in test", tst)
             getattr(self, tst)(filename)
         is_burned_in, burn_in_iter = evaluate_tests(
             self.burn_in_test, self.test_is_burned_in,
             self.test_burn_in_iteration)
         self.is_burned_in = is_burned_in
         self.burn_in_iteration = burn_in_iter
-        logging.info("Is burned in: %r", self.is_burned_in)
+        logger.info("Is burned in: %r", self.is_burned_in)
         if self.is_burned_in:
-            logging.info("Burn-in iteration: %i",
-                         int(self.burn_in_iteration))
+            logger.info("Burn-in iteration: %i",
+                        int(self.burn_in_iteration))
 
     @staticmethod
     def _extra_tests_from_config(cp, section, tag):

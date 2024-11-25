@@ -26,20 +26,14 @@
 This modules provides python contexts that set the default behavior for PyCBC
 objects.
 """
-from __future__ import print_function
 import os
 import pycbc
-from decorator import decorator
+from functools import wraps
 import logging
 from .libutils import get_ctypes_library
 
-try:
-    _libgomp = get_ctypes_library("gomp", ['gomp'])
-except:
-    # Should we fail or give a warning if we cannot import
-    # libgomp? Seems to work even for MKL scheme, but
-    # not entirely sure why...
-    _libgomp = None
+logger = logging.getLogger('pycbc.scheme')
+
 
 class _SchemeManager(object):
     _single = None
@@ -130,17 +124,27 @@ class CPUScheme(Scheme):
         else:
             import multiprocessing
             self.num_threads = multiprocessing.cpu_count()
+        self._libgomp = None
 
     def __enter__(self):
         Scheme.__enter__(self)
+        try:
+            self._libgomp = get_ctypes_library("gomp", ['gomp'],
+                                               mode=ctypes.RTLD_GLOBAL)
+        except:
+            # Should we fail or give a warning if we cannot import
+            # libgomp? Seems to work even for MKL scheme, but
+            # not entirely sure why...
+            pass
+
         os.environ["OMP_NUM_THREADS"] = str(self.num_threads)
-        if _libgomp is not None:
-            _libgomp.omp_set_num_threads( int(self.num_threads) )
+        if self._libgomp is not None:
+            self._libgomp.omp_set_num_threads( int(self.num_threads) )
 
     def __exit__(self, type, value, traceback):
         os.environ["OMP_NUM_THREADS"] = "1"
-        if _libgomp is not None:
-            _libgomp.omp_set_num_threads(1)
+        if self._libgomp is not None:
+            self._libgomp.omp_set_num_threads(1)
         Scheme.__exit__(self, type, value, traceback)
 
 class MKLScheme(CPUScheme):
@@ -184,42 +188,48 @@ def current_prefix():
 
 _import_cache = {}
 def schemed(prefix):
-    @decorator
-    def scheming_function(fn, *args, **kwds):
-        try:
-            return _import_cache[mgr.state][fn](*args, **kwds)
-        except KeyError:
-            exc_errors = []
-            for sch in mgr.state.__class__.__mro__[0:-2]:
-                try:
-                    backend = __import__(prefix + scheme_prefix[sch], fromlist=[fn.__name__])
-                    schemed_fn = getattr(backend, fn.__name__)
-                except (ImportError, AttributeError) as e:
-                    exc_errors += [e]
-                    continue
 
-                if mgr.state not in _import_cache:
-                    _import_cache[mgr.state] = {}
+    def scheming_function(func):
+        @wraps(func)
+        def _scheming_function(*args, **kwds):
+            try:
+                return _import_cache[mgr.state][func](*args, **kwds)
+            except KeyError:
+                exc_errors = []
+                for sch in mgr.state.__class__.__mro__[0:-2]:
+                    try:
+                        backend = __import__(prefix + scheme_prefix[sch],
+                                             fromlist=[func.__name__])
+                        schemed_fn = getattr(backend, func.__name__)
+                    except (ImportError, AttributeError) as e:
+                        exc_errors += [e]
+                        continue
 
-                _import_cache[mgr.state][fn] = schemed_fn
+                    if mgr.state not in _import_cache:
+                        _import_cache[mgr.state] = {}
 
-                return schemed_fn(*args, **kwds)
+                    _import_cache[mgr.state][func] = schemed_fn
 
-            err = """Failed to find implementation of (%s)
-                  for %s scheme." % (str(fn), current_prefix())"""
-            for emsg in exc_errors:
-                err += print(emsg)
-            raise RuntimeError(err)
+                    return schemed_fn(*args, **kwds)
+
+                err = """Failed to find implementation of (%s)
+                      for %s scheme." % (str(fn), current_prefix())"""
+                for emsg in exc_errors:
+                    err += print(emsg)
+                raise RuntimeError(err)
+        return _scheming_function
 
     return scheming_function
 
-@decorator
-def cpuonly(fn, *args, **kwds):
-    if not issubclass(type(mgr.state), CPUScheme):
-        raise TypeError(fn.__name__ +
-                        " can only be called from a CPU processing scheme.")
-    else:
-        return fn(*args, **kwds)
+def cpuonly(func):
+    @wraps(func)
+    def _cpuonly(*args, **kwds):
+        if not issubclass(type(mgr.state), CPUScheme):
+            raise TypeError(fn.__name__ +
+                            " can only be called from a CPU processing scheme.")
+        else:
+            return func(*args, **kwds)
+    return _cpuonly
 
 def insert_processing_option_group(parser):
     """
@@ -254,7 +264,7 @@ def insert_processing_option_group(parser):
                       default=0, type=int)
 
 def from_cli(opt):
-    """Parses the command line options and returns a precessing scheme.
+    """Parses the command line options and returns a processing scheme.
 
     Parameters
     ----------
@@ -271,7 +281,7 @@ def from_cli(opt):
     name = scheme_str[0]
 
     if name == "cuda":
-        logging.info("Running with CUDA support")
+        logger.info("Running with CUDA support")
         ctx = CUDAScheme(opt.processing_device_id)
     elif name == "mkl":
         if len(scheme_str) > 1:
@@ -281,7 +291,7 @@ def from_cli(opt):
             ctx = MKLScheme(num_threads=numt)
         else:
             ctx = MKLScheme()
-        logging.info("Running with MKL support: %s threads" % ctx.num_threads)
+        logger.info("Running with MKL support: %s threads" % ctx.num_threads)
     else:
         if len(scheme_str) > 1:
             numt = scheme_str[1]
@@ -290,7 +300,7 @@ def from_cli(opt):
             ctx = CPUScheme(num_threads=numt)
         else:
             ctx = CPUScheme()
-        logging.info("Running with CPU support: %s threads" % ctx.num_threads)
+        logger.info("Running with CPU support: %s threads" % ctx.num_threads)
     return ctx
 
 def verify_processing_options(opt, parser):

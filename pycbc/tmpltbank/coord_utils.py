@@ -14,14 +14,16 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from __future__ import division
 import logging
 import numpy
-from six.moves import range
+
 from pycbc.tmpltbank.lambda_mapping import get_chirp_params
 from pycbc import conversions
 from pycbc import pnutils
-from pycbc.tmpltbank.em_progenitors import load_ns_sequence, remnant_masses
+from pycbc.neutron_stars import load_ns_sequence
+
+logger = logging.getLogger('pycbc.tmpltbank.coord_utils')
+
 
 def estimate_mass_range(numPoints, massRangeParams, metricParams, fUpper,\
                         covary=True):
@@ -183,7 +185,7 @@ def get_random_mass_point_particles(numPoints, massRangeParams):
 
     return mass1, mass2, spin1z, spin2z
 
-def get_random_mass(numPoints, massRangeParams):
+def get_random_mass(numPoints, massRangeParams, eos='2H'):
     """
     This function will generate a large set of points within the chosen mass
     and spin space, and with the desired minimum remnant disk mass (this applies
@@ -197,7 +199,9 @@ def get_random_mass(numPoints, massRangeParams):
         Number of systems to simulate
     massRangeParams : massRangeParameters instance
         Instance holding all the details of mass ranges and spin ranges.
-
+    eos : string
+        Name of equation of state of neutron star.
+        
     Returns
     --------
     mass1 : float
@@ -225,7 +229,7 @@ def get_random_mass(numPoints, massRangeParams):
     # only systems that can yield (at least) the desired remnant
     # disk mass and that pass the mass and spin range cuts.
     else:
-        ns_sequence, max_ns_g_mass = load_ns_sequence(massRangeParams.ns_eos)
+        max_ns_g_mass = load_ns_sequence(massRangeParams.ns_eos)[1]
         boundary_mass = massRangeParams.ns_bh_boundary_mass
         if max_ns_g_mass < boundary_mass:
             warn_msg = "WARNING: "
@@ -235,7 +239,7 @@ def get_random_mass(numPoints, massRangeParams):
             warn_msg += "(%s). " %(max_ns_g_mass)
             warn_msg += "The code will proceed using the latter value "
             warn_msg += "as the boundary mass."
-            logging.warn(warn_msg)
+            logger.warning(warn_msg)
             boundary_mass = max_ns_g_mass
 
         # Empty arrays to store points that pass all cuts
@@ -293,8 +297,14 @@ def get_random_mass(numPoints, massRangeParams):
             #     threshold mass]
             mask_bright_nsbh = numpy.zeros(len(mass1_nsbh), dtype=bool)
             if eta_nsbh.size != 0:
-                remnant = remnant_masses(eta_nsbh, mass2_nsbh, ns_sequence,
-                                         spin1z_nsbh, 0.)
+                remnant = conversions.remnant_mass_from_mass1_mass2_cartesian_spin_eos(
+                    mass1_nsbh,
+                    mass2_nsbh,
+                    spin1x=0.0,
+                    spin1y=0.0,
+                    spin1z=spin1z_nsbh,
+                    eos=eos
+                )
                 mask_bright_nsbh[remnant
                                  >
                                  massRangeParams.remnant_mass_threshold] = True
@@ -430,7 +440,7 @@ def get_mu_params(lambdas, metricParams, fUpper):
     mus : list of floats or numpy.arrays
         Position of the system(s) in the mu coordinate system
     """
-    lambdas = numpy.array(lambdas, copy=False)
+    lambdas = numpy.asarray(lambdas)
     # If original inputs were floats we need to make this a 2D array
     if len(lambdas.shape) == 1:
         resize_needed = True
@@ -441,7 +451,7 @@ def get_mu_params(lambdas, metricParams, fUpper):
     evecs = metricParams.evecs[fUpper]
     evals = metricParams.evals[fUpper]
 
-    evecs = numpy.array(evecs, copy=False)
+    evecs = numpy.asarray(evecs)
 
     mus = ((lambdas.T).dot(evecs)).T
     mus = mus * numpy.sqrt(evals)[:,None]
@@ -469,7 +479,7 @@ def get_covaried_params(mus, evecsCV):
     xis : list of floats or numpy.arrays
         Position of the system(s) in the xi coordinate system
     """
-    mus = numpy.array(mus, copy=False)
+    mus = numpy.asarray(mus)
     # If original inputs were floats we need to make this a 2D array
     if len(mus.shape) == 1:
         resize_needed = True
@@ -705,7 +715,7 @@ def find_max_and_min_frequencies(name, mass_range_params, freqs):
         warn_msg += "for the metric: %s Hz. " %(freqs.min())
         warn_msg += "Distances for these waveforms will be calculated at "
         warn_msg += "the lowest available metric frequency."
-        logging.warn(warn_msg)
+        logger.warning(warn_msg)
     if upper_f_cutoff > freqs.max():
         warn_msg = "WARNING: "
         warn_msg += "Highest frequency cutoff is %s Hz " %(upper_f_cutoff,)
@@ -713,7 +723,7 @@ def find_max_and_min_frequencies(name, mass_range_params, freqs):
         warn_msg += "for the metric: %s Hz. " %(freqs.max())
         warn_msg += "Distances for these waveforms will be calculated at "
         warn_msg += "the largest available metric frequency."
-        logging.warn(warn_msg)
+        logger.warning(warn_msg)
     return find_closest_calculated_frequencies(cutoffs, freqs)
 
 

@@ -11,11 +11,12 @@ http://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm
 I use a similar naming convention here, with minor simplifications to the
 twiddle factors.
 """
-from __future__ import absolute_import
 import numpy, ctypes, pycbc.types
 from pycbc.libutils import get_ctypes_library
 import logging
 from .fftw_pruned_cython import second_phase_cython
+
+logger = logging.getLogger('pycbc.events.fftw_pruned')
 
 warn_msg = ("The FFTW_pruned module can be used to speed up computing SNR "
             "timeseries by computing first at a low sample rate and then "
@@ -25,7 +26,7 @@ warn_msg = ("The FFTW_pruned module can be used to speed up computing SNR "
             "This code would need verification before trusting results. "
             "Please do contribute test cases.")
 
-logging.warning(warn_msg)
+logger.warning(warn_msg)
 
 # FFTW constants
 FFTW_FORWARD = -1

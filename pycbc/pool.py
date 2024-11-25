@@ -1,13 +1,14 @@
 """ Tools for creating pools of worker processes
 """
-from __future__ import absolute_import
 import multiprocessing.pool
 import functools
-from multiprocessing import TimeoutError
+from multiprocessing import TimeoutError, cpu_count, get_context
 import types
 import signal
 import atexit
 import logging
+
+logger = logging.getLogger('pycbc.pool')
 
 def is_main_process():
     """ Check if this is the main control process and may handle one time tasks
@@ -48,13 +49,20 @@ def _shutdown_pool(p):
 class BroadcastPool(multiprocessing.pool.Pool):
     """ Multiprocessing pool with a broadcast method
     """
-    def __init__(self, processes=None, initializer=None, initargs=(), **kwds):
+    def __init__(self, processes=None, initializer=None, initargs=(),
+                 context=None, **kwds):
         global _process_lock
         global _numdone
         _process_lock = multiprocessing.Lock()
         _numdone = multiprocessing.Value('i', 0)
         noint = functools.partial(_noint, initializer)
-        super(BroadcastPool, self).__init__(processes, noint, initargs, **kwds)
+
+        # Default is fork to preserve child memory inheritance and
+        # copy on write
+        if context is None:
+            context = get_context("fork")
+        super(BroadcastPool, self).__init__(processes, noint, initargs,
+                                            context=context, **kwds)
         atexit.register(_shutdown_pool, self)
 
     def __len__(self):
@@ -90,7 +98,7 @@ class BroadcastPool(multiprocessing.pool.Pool):
         return results
 
     def map(self, func, items, chunksize=None):
-        """ Catch keyboard interuppts to allow the pool to exit cleanly.
+        """ Catch keyboard interrupts to allow the pool to exit cleanly.
 
         Parameters
         ----------
@@ -112,6 +120,13 @@ class BroadcastPool(multiprocessing.pool.Pool):
                 self.join()
                 raise KeyboardInterrupt
 
+    def close_pool(self):
+        """ Close the pool and remove the reference
+        """
+        self.close()
+        self.join()
+        atexit.unregister(_shutdown_pool)
+
 def _dummy_broadcast(self, f, args):
     self.map(f, [args] * self.size)
 
@@ -122,11 +137,22 @@ class SinglePool(object):
     def map(self, f, items):
         return [f(a) for a in items]
 
+    # This is single core, so imap and map
+    # would not behave differently. This is defined
+    # so that the general pool interfaces can use
+    # imap irrespective of the pool type. 
+    imap = map
+    imap_unordered = map
+
+    def close_pool(self):
+        ''' Dummy function to be consistent with BroadcastPool
+        '''
+        pass
+
 def use_mpi(require_mpi=False, log=True):
     """ Get whether MPI is enabled and if so the current size and rank
     """
     use_mpi = False
-    size = rank = 0
     try:
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
@@ -135,13 +161,18 @@ def use_mpi(require_mpi=False, log=True):
         if size > 1:
             use_mpi = True
             if log:
-                logging.info('Running under mpi with size: %s, rank: %s',
-                             size, rank)
+                logger.info(
+                    'Running under mpi with size: %s, rank: %s',
+                    size, rank
+                )
     except ImportError as e:
         if require_mpi:
             print(e)
             raise ValueError("Failed to load mpi, ensure mpi4py is installed")
+    if not use_mpi:
+        size = rank = 0
     return use_mpi, size, rank
+
 
 def choose_pool(processes, mpi=False):
     """ Get processing pool
@@ -156,18 +187,20 @@ def choose_pool(processes, mpi=False):
             atexit.register(pool.close)
 
             if processes:
-                logging.info('NOTE: that for MPI process size determined by '
-                             'MPI launch size, not the processes argument')
+                logger.info('NOTE: that for MPI process size determined by '
+                            'MPI launch size, not the processes argument')
 
             if do_mpi and not mpi:
-                logging.info('NOTE: using MPI as this process was launched'
-                             'under MPI')
+                logger.info('NOTE: using MPI as this process was launched'
+                            'under MPI')
         except ImportError:
             raise ValueError("Failed to start up an MPI pool, "
                              "install mpi4py / schwimmbad")
     elif processes == 1:
         pool = SinglePool()
     else:
+        if processes == -1:
+            processes = cpu_count()
         pool = BroadcastPool(processes)
 
     pool.size = processes

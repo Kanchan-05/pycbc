@@ -21,38 +21,35 @@ Test that a template bank covers a provided parameter space using a provided
 metric approximation to the parameter space.
 """
 
-from __future__ import division
+
+import argparse
+import logging
+import numpy
+import matplotlib
+matplotlib.use('Agg')
+import pylab
+
+from ligo.lw import lsctables, utils as ligolw_utils
 
 import pycbc
 import pycbc.version
+from pycbc import tmpltbank, psd, strain
+from pycbc.io.ligolw import LIGOLWContentHandler
+from pycbc.io.hdf import HFile
+
 
 __author__  = "Ian Harry <ian.harry@astro.cf.ac.uk>"
 __version__ = pycbc.version.git_verbose_msg
 __date__    = pycbc.version.date
 __program__ = "pycbc_bank_verification"
 
-import argparse
-import os, sys
-import copy
-import logging
-import numpy
-import h5py
-from six.moves import range
-from glue.ligolw import ligolw, table, lsctables, utils as ligolw_utils
-from pycbc import tmpltbank, psd, strain, pnutils
-import matplotlib
-matplotlib.use('Agg')
-import pylab
 
 # Read command line option
-_desc = __doc__[1:]
-parser = argparse.ArgumentParser(description=_desc,
+parser = argparse.ArgumentParser(description=__doc__,
            formatter_class=tmpltbank.IndentedHelpFormatterWithNL)
 
 # Begin with code specific options
-parser.add_argument("--version", action="version", version=__version__)
-parser.add_argument("--verbose", action="store_true", default=False,
-                    help="verbose output")
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument("--histogram-output-file", action="store", default=None,
                     help="Output a histogram of fitting factors to the "
                     "supplied file. If not given no histogram is produced.")
@@ -114,11 +111,7 @@ pycbc.strain.insert_strain_option_group(parser)
 
 opts = parser.parse_args()
 
-if opts.verbose:
-    log_level = logging.DEBUG
-else:
-    log_level = logging.WARN
-logging.basicConfig(format='%(asctime)s %(message)s', level=log_level)
+pycbc.init_logging(opts.verbose)
 
 # Sanity check options
 tmpltbank.verify_metric_calculation_options(opts, parser)
@@ -162,7 +155,7 @@ if opts.vary_fupper==False:
 else:
     # determine upper frequency cutoffs corresponding to the min and max 
     # total masses
-    fs = numpy.array(metricParams.evals.keys(), dtype=float)
+    fs = numpy.array(list(metricParams.evals.keys()), dtype=float)
     fs.sort()
     lowEve, highEve = tmpltbank.find_max_and_min_frequencies(\
                               opts.bank_fupper_formula, massRangeParams, fs)
@@ -196,22 +189,15 @@ logging.info("Reading template bank.")
 
 
 if opts.input_bank.endswith(('.xml','.xml.gz','.xmlgz')):
-    # dummy class needed for loading LIGOLW files
-    class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
-        pass
-
-    lsctables.use_in(LIGOLWContentHandler)
-
     indoc = ligolw_utils.load_filename(opts.input_bank,
                                        contenthandler=LIGOLWContentHandler)
-    template_list = table.get_table(indoc,
-                                    lsctables.SnglInspiralTable.tableName)
+    template_list = lsctables.SnglInspiralTable.get_table(indoc)
 
     partitioned_bank_object.add_tmpltbank_from_xml_table\
         (template_list, vary_fupper=opts.vary_fupper)
 
 elif opts.input_bank.endswith(('.h5','.hdf','.hdf5')):
-    h5_fp = h5py.File(opts.input_bank, 'r')
+    h5_fp = HFile(opts.input_bank, 'r')
     partitioned_bank_object.add_tmpltbank_from_hdf_file\
         (h5_fp, vary_fupper=opts.vary_fupper)
 else:

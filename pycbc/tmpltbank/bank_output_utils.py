@@ -1,104 +1,19 @@
-from __future__ import division
-from six.moves import range
+import logging
 import numpy
+
 from lal import PI, MTSUN_SI, TWOPI, GAMMA
-from glue.ligolw import ligolw, lsctables, ilwd, utils as ligolw_utils
-from glue.ligolw.utils import process as ligolw_process
+from ligo.lw import ligolw, lsctables, utils as ligolw_utils
+
 from pycbc import pnutils
 from pycbc.tmpltbank.lambda_mapping import ethinca_order_from_string
+from pycbc.io.ligolw import (
+    return_empty_sngl, return_search_summary, create_process_table
+)
+from pycbc.io.hdf import HFile
 
-def return_empty_sngl(nones=False):
-    """
-    Function to create a SnglInspiral object where all columns are populated
-    but all are set to values that test False (ie. strings to '', floats/ints
-    to 0, ...). This avoids errors when you try to create a table containing
-    columns you don't care about, but which still need populating. NOTE: This
-    will also produce a process_id and event_id with 0 values. For most
-    applications these should be set to their correct values.
+from pycbc.waveform import get_waveform_filter_length_in_time as gwflit
 
-    Parameters
-    ----------
-    nones : bool (False)
-        If True, just set all columns to None.
-
-    Returns
-    --------
-    lsctables.SnglInspiral
-        The "empty" SnglInspiral object.
-    """
-
-    sngl = lsctables.SnglInspiral()
-    cols = lsctables.SnglInspiralTable.validcolumns
-    if nones:
-        for entry in cols:
-            setattr(sngl, entry, None)
-    else:
-        for entry in cols.keys():
-            if cols[entry] in ['real_4','real_8']:
-                setattr(sngl,entry,0.)
-            elif cols[entry] == 'int_4s':
-                setattr(sngl,entry,0)
-            elif cols[entry] == 'lstring':
-                setattr(sngl,entry,'')
-            elif entry == 'process_id':
-                sngl.process_id = ilwd.ilwdchar("process:process_id:0")
-            elif entry == 'event_id':
-                sngl.event_id = ilwd.ilwdchar("sngl_inspiral:event_id:0")
-            else:
-                raise ValueError("Column %s not recognized" %(entry) )
-    return sngl
-
-def return_search_summary(start_time=0, end_time=0, nevents=0,
-                          ifos=None, **kwargs):
-    """
-    Function to create a SearchSummary object where all columns are populated
-    but all are set to values that test False (ie. strings to '', floats/ints
-    to 0, ...). This avoids errors when you try to create a table containing
-    columns you don't care about, but which still need populating. NOTE: This
-    will also produce a process_id with 0 values. For most applications these
-    should be set to their correct values.
-
-    It then populates columns if given them as options.
-
-    Returns
-    --------
-    lsctables.SeachSummary
-        The "empty" SearchSummary object.
-    """
-    if ifos is None:
-        ifos = []
-
-    # create an empty search summary
-    search_summary = lsctables.SearchSummary()
-    cols = lsctables.SearchSummaryTable.validcolumns
-    for entry in cols.keys():
-        if cols[entry] in ['real_4','real_8']:
-            setattr(search_summary,entry,0.)
-        elif cols[entry] == 'int_4s':
-            setattr(search_summary,entry,0)
-        elif cols[entry] == 'lstring':
-            setattr(search_summary,entry,'')
-        elif entry == 'process_id':
-            search_summary.process_id = ilwd.ilwdchar("process:process_id:0")
-        else:
-            raise ValueError("Column %s not recognized" %(entry) )
-
-    # fill in columns
-    if len(ifos):
-        search_summary.ifos = ','.join(ifos)
-    if nevents:
-        search_summary.nevents = nevents
-    if start_time and end_time:
-        search_summary.in_start_time = int(start_time)
-        search_summary.in_start_time_ns = int(start_time % 1 * 1e9)
-        search_summary.in_end_time = int(end_time)
-        search_summary.in_end_time_ns = int(end_time % 1 * 1e9)
-        search_summary.out_start_time = int(start_time)
-        search_summary.out_start_time_ns = int(start_time % 1 * 1e9)
-        search_summary.out_end_time = int(end_time)
-        search_summary.out_end_time_ns = int(end_time % 1 * 1e9)
-
-    return search_summary
+logger = logging.getLogger('pycbc.tmpltbank.bank_output_utils')
 
 def convert_to_sngl_inspiral_table(params, proc_id):
     '''
@@ -110,7 +25,7 @@ def convert_to_sngl_inspiral_table(params, proc_id):
     params : iterable
         Each entry in the params iterable should be a sequence of
         [mass1, mass2, spin1z, spin2z] in that order
-    proc_id : ilwd char
+    proc_id : int
         Process ID to add to each row of the sngl_inspiral table
 
     Returns
@@ -290,12 +205,12 @@ def calculate_ethinca_metric_comps(metricParams, ethincaParams, mass1, mass2,
 
     return fMax_theor, gammaVals
 
-def output_sngl_inspiral_table(outputFile, tempBank, metricParams,
-                               ethincaParams, programName="", optDict = None,
-                               outdoc=None, **kwargs):
+def output_sngl_inspiral_table(outputFile, tempBank, programName="",
+                               optDict = None, outdoc=None,
+                               **kwargs): # pylint:disable=unused-argument
     """
-    Function that converts the information produced by the various pyCBC bank
-    generation codes into a valid LIGOLW xml file containing a sngl_inspiral
+    Function that converts the information produced by the various PyCBC bank
+    generation codes into a valid LIGOLW XML file containing a sngl_inspiral
     table and outputs to file.
 
     Parameters
@@ -305,15 +220,6 @@ def output_sngl_inspiral_table(outputFile, tempBank, metricParams,
     tempBank : iterable
         Each entry in the tempBank iterable should be a sequence of
         [mass1,mass2,spin1z,spin2z] in that order.
-    metricParams : metricParameters instance
-        Structure holding all the options for construction of the metric
-        and the eigenvalues, eigenvectors and covariance matrix
-        needed to manipulate the space.
-    ethincaParams: {ethincaParameters instance, None}
-        Structure holding options relevant to the ethinca metric computation
-        including the upper frequency cutoff to be used for filtering.
-        NOTE: The computation is currently only valid for non-spinning systems
-        and uses the TaylorF2 approximant.
     programName (key-word-argument) : string
         Name of the executable that has been run
     optDict (key-word argument) : dictionary
@@ -321,9 +227,8 @@ def output_sngl_inspiral_table(outputFile, tempBank, metricParams,
     outdoc (key-word argument) : ligolw xml document
         If given add template bank to this representation of a xml document and
         write to disk. If not given create a new document.
-    kwargs : key-word arguments
-        All other key word arguments will be passed directly to
-        ligolw_process.register_to_xmldoc
+    kwargs : optional key-word arguments
+        Allows unused options to be passed to this function (for modularity)
     """
     if optDict is None:
         optDict = {}
@@ -337,32 +242,14 @@ def output_sngl_inspiral_table(outputFile, tempBank, metricParams,
         if optDict['channel_name'] is not None:
             ifos = [optDict['channel_name'][0:2]]
 
-    proc_id = ligolw_process.register_to_xmldoc(outdoc, programName, optDict,
-                                                ifos=ifos, **kwargs).process_id
+    proc = create_process_table(
+        outdoc,
+        program_name=programName,
+        detectors=ifos,
+        options=optDict
+    )
+    proc_id = proc.process_id
     sngl_inspiral_table = convert_to_sngl_inspiral_table(tempBank, proc_id)
-    # Calculate Gamma components if needed
-    if ethincaParams is not None:
-        if ethincaParams.doEthinca:
-            for sngl in sngl_inspiral_table:
-                # Set tau_0 and tau_3 values needed for the calculation of
-                # ethinca metric distances
-                (sngl.tau0,sngl.tau3) = pnutils.mass1_mass2_to_tau0_tau3(
-                    sngl.mass1, sngl.mass2, metricParams.f0)
-                fMax_theor, GammaVals = calculate_ethinca_metric_comps(
-                    metricParams, ethincaParams,
-                    sngl.mass1, sngl.mass2, spin1z=sngl.spin1z,
-                    spin2z=sngl.spin2z, full_ethinca=ethincaParams.full_ethinca)
-                # assign the upper frequency cutoff and Gamma0-5 values
-                sngl.f_final = fMax_theor
-                for i in range(len(GammaVals)):
-                    setattr(sngl, "Gamma"+str(i), GammaVals[i])
-        # If Gamma metric components are not wanted, assign f_final from an
-        # upper frequency cutoff specified in ethincaParams
-        elif ethincaParams.cutoff is not None:
-            for sngl in sngl_inspiral_table:
-                sngl.f_final = pnutils.frequency_cutoff_from_name(
-                    ethincaParams.cutoff,
-                    sngl.mass1, sngl.mass2, sngl.spin1z, sngl.spin2z)
 
     # set per-template low-frequency cutoff
     if 'f_low_column' in optDict and 'f_low' in optDict and \
@@ -381,11 +268,98 @@ def output_sngl_inspiral_table(outputFile, tempBank, metricParams,
 
     # make search summary table
     search_summary_table = lsctables.New(lsctables.SearchSummaryTable)
-    search_summary = return_search_summary(start_time, end_time,
-                               len(sngl_inspiral_table), ifos, **kwargs)
+    search_summary = return_search_summary(
+        start_time, end_time, len(sngl_inspiral_table), ifos
+    )
     search_summary_table.append(search_summary)
     outdoc.childNodes[0].appendChild(search_summary_table)
 
     # write the xml doc to disk
-    ligolw_utils.write_filename(outdoc, outputFile,
-                                gz=outputFile.endswith('.gz'))
+    ligolw_utils.write_filename(outdoc, outputFile)
+
+
+def output_bank_to_hdf(outputFile, tempBank, optDict=None, programName='',
+                       approximant=None, output_duration=False,
+                       **kwargs): # pylint:disable=unused-argument
+    """
+    Function that converts the information produced by the various PyCBC bank
+    generation codes into a hdf5 file.
+
+    Parameters
+    -----------
+    outputFile : string
+        Name of the file that the bank will be written to
+    tempBank : iterable
+        Each entry in the tempBank iterable should be a sequence of
+        [mass1,mass2,spin1z,spin2z] in that order.
+    programName (key-word-argument) : string
+        Name of the executable that has been run
+    optDict (key-word argument) : dictionary
+        Dictionary of the command line arguments passed to the program
+    approximant : string
+        The approximant to be outputted to the file,
+        if output_duration is True, this is also used for that calculation.
+    output_duration : boolean
+        Output the duration of the template, calculated using
+        get_waveform_filter_length_in_time, to the file.
+    kwargs : optional key-word arguments
+        Allows unused options to be passed to this function (for modularity)
+    """
+    bank_dict = {}
+    mass1, mass2, spin1z, spin2z = list(zip(*tempBank))
+    bank_dict['mass1'] = mass1
+    bank_dict['mass2'] = mass2
+    bank_dict['spin1z'] = spin1z
+    bank_dict['spin2z'] = spin2z
+
+    # Add other values to the bank dictionary as appropriate
+    if optDict is not None:
+        bank_dict['f_lower'] = numpy.ones_like(mass1) * \
+            optDict['f_low']
+        argument_string = [f'{k}:{v}' for k, v in optDict.items()]
+
+    if optDict is not None and optDict['output_f_final']:
+        bank_dict['f_final'] = numpy.ones_like(mass1) * \
+            optDict['f_upper']
+
+    if approximant:
+        if not isinstance(approximant, bytes):
+            appx = approximant.encode()
+        bank_dict['approximant'] = numpy.repeat(appx, len(mass1))
+
+    if output_duration:
+        appx = approximant if approximant else 'SPAtmplt'
+        tmplt_durations = numpy.zeros_like(mass1)
+        for i in range(len(mass1)):
+            wfrm_length = gwflit(appx,
+                                 mass1=mass1[i],
+                                 mass2=mass2[i],
+                                 f_lower=optDict['f_low'],
+                                 phase_order=7)
+            tmplt_durations[i] = wfrm_length
+        bank_dict['template_duration'] = tmplt_durations
+
+    with HFile(outputFile, 'w') as bankf_out:
+        bankf_out.attrs['program'] = programName
+        if optDict is not None:
+            bankf_out.attrs['arguments'] = argument_string
+        for k, v in bank_dict.items():
+            bankf_out[k] = v
+
+
+def output_bank_to_file(outputFile, tempBank, **kwargs):
+    if outputFile.endswith(('.xml','.xml.gz','.xmlgz')):
+        output_sngl_inspiral_table(
+            outputFile,
+            tempBank,
+            **kwargs
+        )
+    elif outputFile.endswith(('.h5','.hdf','.hdf5')):
+        output_bank_to_hdf(
+            outputFile,
+            tempBank,
+            **kwargs
+        )
+    else:
+        err_msg = f"Unrecognized extension for file {outputFile}."
+        raise ValueError(err_msg)

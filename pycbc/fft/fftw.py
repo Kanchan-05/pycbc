@@ -1,4 +1,5 @@
-from pycbc.types import zeros, complex64, complex128
+import os
+from pycbc.types import zeros
 import numpy as _np
 import ctypes
 import pycbc.scheme as _scheme
@@ -11,6 +12,14 @@ from ..types import check_aligned
 # no FFTW function should be called until the user has had the chance
 # to set the threading backend, it is ESSENTIAL that simply loading this
 # module should not actually *call* ANY functions.
+
+# NOTE:
+# When loading FFTW we use os.RTLD_DEEPBIND to avoid potential segfaults due
+# to conflicts with MKL if both are present.
+if hasattr(os, 'RTLD_DEEPBIND'):
+    FFTW_RTLD_MODE = os.RTLD_DEEPBIND
+else:
+    FFTW_RTLD_MODE = ctypes.DEFAULT_MODE
 
 #FFTW constants, these are pulled from fftw3.h
 FFTW_FORWARD = -1
@@ -30,8 +39,8 @@ FFTW_WISDOM_ONLY = 1 << 21
 # We need to construct them directly with CDLL so
 # we can give the RTLD_GLOBAL mode, which we must do
 # in order to use the threaded libraries as well.
-double_lib = get_ctypes_library('fftw3',['fftw3'],mode=ctypes.RTLD_GLOBAL)
-float_lib = get_ctypes_library('fftw3f',['fftw3f'],mode=ctypes.RTLD_GLOBAL)
+double_lib = get_ctypes_library('fftw3', ['fftw3'], mode=FFTW_RTLD_MODE)
+float_lib = get_ctypes_library('fftw3f', ['fftw3f'], mode=FFTW_RTLD_MODE)
 if (double_lib is None) or (float_lib is None):
     raise ImportError("Unable to find FFTW libraries")
 
@@ -97,13 +106,28 @@ def _init_threads(backend):
         raise ValueError("Backend {0} for FFTW threading does not exist!".format(backend))
     if double_threaded_libname is not None:
         try:
-            # Note that the threaded libraries don't have their own pkg-config files;
-            # we must look for them wherever we look for double or single FFTW itself
-            _double_threaded_lib = get_ctypes_library(double_threaded_libname,['fftw3'],mode=ctypes.RTLD_GLOBAL)
-            _float_threaded_lib =  get_ctypes_library(float_threaded_libname,['fftw3f'],mode=ctypes.RTLD_GLOBAL)
+            # For reasons Ian doesn't understand we should not load libgomp
+            # first using RTLD_DEEPBIND, so force loading it here if needed
+            if backend == 'openmp':
+                get_ctypes_library('gomp', [], mode=ctypes.DEFAULT_MODE)
+            # Note that the threaded libraries don't have their own pkg-config
+            # files we must look for them wherever we look for double or single
+            # FFTW itself.
+            _double_threaded_lib = get_ctypes_library(
+                double_threaded_libname,
+                ['fftw3'],
+                mode=FFTW_RTLD_MODE
+            )
+            _float_threaded_lib =  get_ctypes_library(
+                float_threaded_libname,
+                ['fftw3f'],
+                mode=FFTW_RTLD_MODE
+            )
             if (_double_threaded_lib is None) or (_float_threaded_lib is None):
-                raise RuntimeError("Unable to load threaded libraries {0} or {1}".format(double_threaded_libname,
-                                                                                         float_threaded_libname))
+                err_str = 'Unable to load threaded libraries'
+                err_str += f'{double_threaded_libname} or '
+                err_str += f'{float_threaded_libname}'
+                raise RuntimeError(err_str)
             dret = _double_threaded_lib.fftw_init_threads()
             fret = _float_threaded_lib.fftwf_init_threads()
             # FFTW for some reason uses *0* to indicate failure.  In C.
@@ -132,8 +156,9 @@ def set_threads_backend(backend=None):
         if retval != 0:
             raise RuntimeError("Could not initialize FFTW threading backend {0}".format(backend))
     else:
-        # Note that we pop() from the end, so 'openmp' is the first thing tried
-        _backend_list = ['unthreaded','pthreads','openmp']
+        # Note that we pop() from the end, so 'pthreads'
+        # is the first thing tried
+        _backend_list = ['unthreaded','openmp', 'pthreads']
         while not _fftw_threaded_set:
             _next_backend = _backend_list.pop()
             retval = _init_threads(_next_backend)
@@ -302,11 +327,9 @@ def plan(size, idtype, odtype, direction, mlvl, aligned, nthreads, inplace):
     if idtype.char in ['f', 'F']:
         destroy = float_lib.fftwf_destroy_plan
     else:
-        destroy = double_lib.fftw_destroy_plan 
+        destroy = double_lib.fftw_destroy_plan
 
     destroy.argtypes = [ctypes.c_void_p]
-
-
     return theplan, destroy
 
 
@@ -331,6 +354,7 @@ def ifft(invec, outvec, prec, itype, otype):
                    _scheme.mgr.state.num_threads, (invec.ptr == outvec.ptr))
     execute(theplan, invec, outvec)
     destroy(theplan)
+
 
 # Class based API
 
@@ -381,11 +405,11 @@ plan_many_r2c_d.restype = ctypes.c_void_p
 # translate input and output dtypes into the correct planning function.
 
 _plan_funcs_dict = { ('complex64', 'complex64') : plan_many_c2c_f,
-                     ('complex64', 'float32') : plan_many_r2c_f,
-                     ('float32', 'complex64') : plan_many_c2r_f,
+                     ('float32', 'complex64') : plan_many_r2c_f,
+                     ('complex64', 'float32') : plan_many_c2r_f,
                      ('complex128', 'complex128') : plan_many_c2c_d,
-                     ('complex128', 'float64') : plan_many_r2c_d,
-                     ('float64', 'complex128') : plan_many_c2r_d }
+                     ('float64', 'complex128') : plan_many_r2c_d,
+                     ('complex128', 'float64') : plan_many_c2r_d }
 
 # To avoid multiple-inheritance, we set up a function that returns much
 # of the initialization that will need to be handled in __init__ of both
@@ -406,18 +430,16 @@ def _fftw_setup(fftobj):
     plan_func = _plan_funcs_dict[ (str(fftobj.invec.dtype), str(fftobj.outvec.dtype)) ]
     tmpin = zeros(len(fftobj.invec), dtype = fftobj.invec.dtype)
     tmpout = zeros(len(fftobj.outvec), dtype = fftobj.outvec.dtype)
-    # C2C, forward
-    if fftobj.forward and (fftobj.outvec.dtype in [complex64, complex128]):
+    # C2C
+    if fftobj.outvec.kind == 'complex' and fftobj.invec.kind == 'complex':
+        if fftobj.forward:
+            ffd = FFTW_FORWARD
+        else:
+            ffd = FFTW_BACKWARD
         plan = plan_func(1, n.ctypes.data, fftobj.nbatch,
                          tmpin.ptr, inembed.ctypes.data, 1, fftobj.idist,
                          tmpout.ptr, onembed.ctypes.data, 1, fftobj.odist,
-                         FFTW_FORWARD, flags)
-    # C2C, backward
-    elif not fftobj.forward and (fftobj.invec.dtype in [complex64, complex128]):
-        plan = plan_func(1, n.ctypes.data, fftobj.nbatch,
-                         tmpin.ptr, inembed.ctypes.data, 1, fftobj.idist,
-                         tmpout.ptr, onembed.ctypes.data, 1, fftobj.odist,
-                         FFTW_BACKWARD, flags)
+                         ffd, flags)
     # R2C or C2R (hence no direction argument for plan creation)
     else:
         plan = plan_func(1, n.ctypes.data, fftobj.nbatch,

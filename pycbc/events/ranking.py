@@ -1,8 +1,10 @@
 """ This module contains functions for calculating single-ifo ranking
 statistic values
 """
-from six import raise_from
+import logging
 import numpy
+
+logger = logging.getLogger('pycbc.events.ranking')
 
 
 def effsnr(snr, reduced_x2, fac=250.):
@@ -300,6 +302,21 @@ sngls_ranking_function_dict = {
     'newsnr_sgveto_psdvar_scaled_threshold': get_newsnr_sgveto_psdvar_scaled_threshold,
 }
 
+# Lists of datasets required in the trigs object for each function
+required_datasets = {}
+required_datasets['snr'] = ['snr']
+required_datasets['newsnr'] = required_datasets['snr'] + ['chisq', 'chisq_dof']
+required_datasets['new_snr'] = required_datasets['newsnr']
+required_datasets['newsnr_sgveto'] = required_datasets['newsnr'] + ['sg_chisq']
+required_datasets['newsnr_sgveto_psdvar'] = \
+    required_datasets['newsnr_sgveto'] + ['psd_var_val']
+required_datasets['newsnr_sgveto_psdvar_threshold'] = \
+    required_datasets['newsnr_sgveto_psdvar']
+required_datasets['newsnr_sgveto_psdvar_scaled'] = \
+    required_datasets['newsnr_sgveto_psdvar']
+required_datasets['newsnr_sgveto_psdvar_scaled_threshold'] = \
+    required_datasets['newsnr_sgveto_psdvar']
+
 
 def get_sngls_ranking_from_trigs(trigs, statname, **kwargs):
     """
@@ -310,7 +327,7 @@ def get_sngls_ranking_from_trigs(trigs, statname, **kwargs):
 
     Parameters
     -----------
-    trigs: dict of numpy.ndarrays
+    trigs: dict of numpy.ndarrays, SingleDetTriggers or ReadByTemplate
         Dictionary holding single detector trigger information.
     statname:
         The statistic to use.
@@ -320,7 +337,7 @@ def get_sngls_ranking_from_trigs(trigs, statname, **kwargs):
         sngl_func = sngls_ranking_function_dict[statname]
     except KeyError as exc:
         err_msg = 'Single-detector ranking {} not recognized'.format(statname)
-        raise_from(ValueError(err_msg), exc)
+        raise ValueError(err_msg) from exc
 
     # NOTE: In the sngl_funcs all the kwargs are explicitly stated, so any
     #       kwargs sent here must be known to the function.

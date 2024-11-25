@@ -65,18 +65,33 @@ configurations which can analyze this simple problem.
 The following are also supported, but require either python3 support only (cpnest)
 or an external package (multinest).
    
-===============================================
+================================================
 `cpnest <https://github.com/johnveitch/cpnest>`_
-===============================================
+================================================
    
-.. literalinclude:: ../../../examples/inference/samplers/cpnest_tub.ini
+.. literalinclude:: ../../../examples/inference/samplers/cpnest_stub.ini
    :language: ini
    
 =============================================================
 `Multinest <https://johannesbuchner.github.io/PyMultiNest/>`_
 =============================================================
    
-.. literalinclude:: ../../../examples/inference/samplers/multinest_tub.ini
+.. literalinclude:: ../../../examples/inference/samplers/multinest_stub.ini
+   :language: ini
+   
+============================================================
+`Snowline <https://johannesbuchner.github.io/snowline/>`_
+============================================================
+   
+.. literalinclude:: ../../../examples/inference/samplers/snowline_stub.ini
+   :language: ini
+   
+   
+============================================================
+`nessai <https://github.com/mj-will/nessai>`_
+============================================================
+   
+.. literalinclude:: ../../../examples/inference/samplers/nessai_stub.ini
    :language: ini
    
 If we run these samplers, we create the following plot:

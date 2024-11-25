@@ -28,19 +28,17 @@ import os
 import logging
 
 from abc import (ABCMeta, abstractmethod)
-from six import add_metaclass
 
 from . import waveform
-from .waveform import (NoWaveformError, FailedWaveformError)
+from .waveform import (FailedWaveformError)
 from . import ringdown
 from . import supernovae
 from . import waveform_modes
-from pycbc import filter
 from pycbc import transforms
 from pycbc.types import TimeSeries
 from pycbc.waveform import parameters
-from pycbc.waveform.utils import apply_fd_time_shift, taper_timeseries, \
-                                 ceilpow2
+from pycbc.waveform.utils import apply_fseries_time_shift, taper_timeseries, \
+                                 ceilpow2, apply_fd_time_shift
 from pycbc.detector import Detector
 from pycbc.pool import use_mpi
 import lal as _lal
@@ -86,12 +84,6 @@ class BaseGenerator(object):
     current_params : dict
         A dictionary of the frozen keyword arguments and variable arguments
         that were last passed to the waveform generator.
-
-    Methods
-    -------
-    generate(variable_values)
-        Generates a waveform using the variable arguments and the frozen
-        arguments.
     """
     def __init__(self, generator, variable_args=(), record_failures=False,
                  **frozen_params):
@@ -155,8 +147,7 @@ class BaseGenerator(object):
             return new_waveform
         except RuntimeError as e:
             if self.record_failures:
-                import h5py
-                from pycbc.io.hdf import dump_state
+                from pycbc.io.hdf import dump_state, HFile
 
                 global failed_counter
 
@@ -168,7 +159,7 @@ class BaseGenerator(object):
                 if not os.path.exists('failed'):
                     os.makedirs('failed')
 
-                with h5py.File(outname) as f:
+                with HFile(outname) as f:
                     dump_state(self.current_params, f,
                                dsetname=str(failed_counter))
                     failed_counter += 1
@@ -185,16 +176,15 @@ class BaseGenerator(object):
 class BaseCBCGenerator(BaseGenerator):
     """Adds ability to convert from various derived parameters to parameters
     needed by the waveform generators.
-
-    Attributes
-    ----------
-    possible_args : set
-        The set of names of arguments that may be used in the `variable_args`
-        or `frozen_params`.
     """
+
     possible_args = set(parameters.td_waveform_params +
                         parameters.fd_waveform_params +
                         ['taper'])
+    """set: The set of names of arguments that may be used in the
+        `variable_args` or `frozen_params`.
+    """
+
     def __init__(self, generator, variable_args=(), **frozen_params):
         super(BaseCBCGenerator, self).__init__(generator,
             variable_args=variable_args, **frozen_params)
@@ -202,23 +192,19 @@ class BaseCBCGenerator(BaseGenerator):
         # parameters to those used by the waveform generation interface
         all_args = set(list(self.frozen_params.keys()) +
                        list(self.variable_args))
-        # compare a set of all args of the generator to the input parameters
-        # of the functions that do conversions and adds to list of pregenerate
-        # functions if it is needed
-        params_used, cs = transforms.get_common_cbc_transforms(
-                                       list(self.possible_args), variable_args)
-        for c in cs:
-            self._add_pregenerate(c)
         # check that there are no unused (non-calibration) parameters
         calib_args = set([a for a in self.variable_args if
                           a.startswith('calib_')])
         all_args = all_args - calib_args
-        unused_args = all_args.difference(params_used) \
-                              .difference(self.possible_args)
+        unused_args = all_args - self.possible_args
         if len(unused_args):
-            logging.warning("WARNING: The following args are not being used "
-                            "for waveform generation: %s",
-                            ', '.join(unused_args))
+            logging.warning("WARNING: The following parameters are generally "
+                            "not used by CBC waveform generators: %s. If you "
+                            "have provided a transform that converted these "
+                            "into known parameters (e.g., mchirp, q to "
+                            "mass1, mass2) or you are using a custom model "
+                            "that uses these parameters, you can safely "
+                            "ignore this message.", ', '.join(unused_args))
 
 
 class FDomainCBCGenerator(BaseCBCGenerator):
@@ -227,13 +213,6 @@ class FDomainCBCGenerator(BaseCBCGenerator):
     Uses `waveform.get_fd_waveform` as a generator function to create
     frequency- domain CBC waveforms in the radiation frame; i.e., with no
     detector response function applied. For more details, see `BaseGenerator`.
-
-    Derived parameters not understood by `get_fd_waveform` may be used as
-    variable args and/or frozen parameters, as long as they can be converted
-    into parameters that `get_fd_waveform` can use. For example, `mchirp` and
-    `eta` (currently, the only supported derived parameters) may be used as
-    variable/frozen params; these are converted to `mass1` and `mass2` prior to
-    calling the waveform generator function.
 
     Examples
     --------
@@ -247,26 +226,6 @@ class FDomainCBCGenerator(BaseCBCGenerator):
     >>> generator.generate(mass1=1.4, mass2=1.4)
         (<pycbc.types.frequencyseries.FrequencySeries at 0x1110c1450>,
          <pycbc.types.frequencyseries.FrequencySeries at 0x1110c1510>)
-
-    Initialize a generator using mchirp, eta as the variable args, and generate
-    a waveform:
-
-    >>> generator = FDomainCBCGenerator(variable_args=['mchirp', 'eta'], delta_f=1./32, f_lower=30., approximant='TaylorF2')
-    >>> generator.generate(mchirp=1.5, eta=0.25)
-        (<pycbc.types.frequencyseries.FrequencySeries at 0x109a104d0>,
-         <pycbc.types.frequencyseries.FrequencySeries at 0x109a10b50>)
-
-    Note that the `current_params` contains the mchirp and eta values, along
-    with the mass1 and mass2 they were converted to:
-
-    >>> generator.current_params
-        {'approximant': 'TaylorF2',
-         'delta_f': 0.03125,
-         'eta': 0.25,
-         'f_lower': 30.0,
-         'mass1': 1.7230475324955525,
-         'mass2': 1.7230475324955525,
-         'mchirp': 1.5}
 
     """
     def __init__(self, variable_args=(), **frozen_params):
@@ -296,13 +255,6 @@ class TDomainCBCGenerator(BaseCBCGenerator):
     domain CBC waveforms in the radiation frame; i.e., with no detector
     response function applied. For more details, see `BaseGenerator`.
 
-    Derived parameters not understood by `get_td_waveform` may be used as
-    variable args and/or frozen parameters, as long as they can be converted
-    into parameters that `get_td_waveform` can use. For example, `mchirp` and
-    `eta` (currently, the only supported derived parameters) may be used as
-    variable/frozen params; these are converted to `mass1` and `mass2` prior to
-    calling the waveform generator function.
-
     Examples
     --------
     Initialize a generator:
@@ -315,14 +267,6 @@ class TDomainCBCGenerator(BaseCBCGenerator):
     >>> generator.generate(mass1=2., mass2=1.3)
         (<pycbc.types.timeseries.TimeSeries at 0x10e546710>,
          <pycbc.types.timeseries.TimeSeries at 0x115f37690>)
-
-    Initialize a generator using mchirp, eta as the variable args, and generate
-    a waveform:
-
-    >>> generator = TDomainCBCGenerator(variable_args=['mchirp', 'eta'], delta_t=1./4096, f_lower=30., approximant='TaylorT4')
-    >>> generator.generate(mchirp=1.75, eta=0.2)
-        (<pycbc.types.timeseries.TimeSeries at 0x116ac6050>,
-         <pycbc.types.timeseries.TimeSeries at 0x116ac6950>)
 
     """
     def __init__(self, variable_args=(), **frozen_params):
@@ -500,8 +444,7 @@ class TDomainSupernovaeGenerator(BaseGenerator):
 #
 
 
-@add_metaclass(ABCMeta)
-class BaseFDomainDetFrameGenerator(object):
+class BaseFDomainDetFrameGenerator(metaclass=ABCMeta):
     """Base generator for frquency-domain waveforms in a detector frame.
 
     Parameters
@@ -528,12 +471,6 @@ class BaseFDomainDetFrameGenerator(object):
 
     Attributes
     ----------
-    location_args : set([])
-        Should be overriden by childern classes with a set of parameters
-        that set the binary's location.
-
-    Attributes
-    ----------
     detectors : dict
         The dictionary of detectors that antenna patterns are calculated for
         on each call of generate. If no detectors were provided, will be
@@ -541,10 +478,6 @@ class BaseFDomainDetFrameGenerator(object):
     detector_names : list
         The list of detector names. If no detectors were provided, then this
         will be ['RF'] for "radiation frame".
-    epoch : lal.LIGOTimeGPS
-        The GPS start time of the frequency series returned by the generate function.
-        A time shift is applied to the waveform equal to tc-epoch. Update by using
-        ``set_epoch``.
     current_params : dict
         A dictionary of name, value pairs of the arguments that were last
         used by the generate function.
@@ -559,7 +492,11 @@ class BaseFDomainDetFrameGenerator(object):
         function.
 
     """
+
     location_args = set([])
+    """Set: Should be overriden by children classes with a set of parameters
+        that set the binary's location.
+    """
 
     def __init__(self, rFrameGeneratorClass, epoch, detectors=None,
                  variable_args=(), recalib=None, gates=None, **frozen_params):
@@ -609,6 +546,10 @@ class BaseFDomainDetFrameGenerator(object):
 
     @property
     def epoch(self):
+        """The GPS start time of the frequency series returned by the generate
+        function. A time shift is applied to the waveform equal to tc-epoch.
+        Update by using ``set_epoch``
+        """
         return _lal.LIGOTimeGPS(self._epoch)
 
     @abstractmethod
@@ -654,22 +595,6 @@ class FDomainDetFrameGenerator(BaseFDomainDetFrameGenerator):
 
     Attributes
     ----------
-    location_args : set(['tc', 'ra', 'dec', 'polarization'])
-        The set of location parameters. These are not passed to the rFrame
-        generator class; instead, they are used to apply the detector response
-        function and/or shift the waveform in time. The parameters are:
-
-          * tc: The GPS time of coalescence (should be geocentric time).
-          * ra: Right ascension.
-          * dec: declination
-          * polarization: polarization.
-
-        All of these must be provided in either the variable args or the
-        frozen params if detectors is not None. If detectors
-        is None, tc may optionally be provided.
-
-    Attributes
-    ----------
     detectors : dict
         The dictionary of detectors that antenna patterns are calculated for
         on each call of generate. If no detectors were provided, will be
@@ -708,7 +633,22 @@ class FDomainDetFrameGenerator(BaseFDomainDetFrameGenerator):
      'L1': <pycbc.types.frequencyseries.FrequencySeries at 0x116637a50>}
 
     """
+
     location_args = set(['tc', 'ra', 'dec', 'polarization'])
+    """set(['tc', 'ra', 'dec', 'polarization']):
+        The set of location parameters. These are not passed to the rFrame
+        generator class; instead, they are used to apply the detector response
+        function and/or shift the waveform in time. The parameters are:
+
+          * tc: The GPS time of coalescence (should be geocentric time).
+          * ra: Right ascension.
+          * dec: declination
+          * polarization: polarization.
+
+        All of these must be provided in either the variable args or the
+        frozen params if detectors is not None. If detectors
+        is None, tc may optionally be provided.
+    """
 
     def generate(self, **kwargs):
         """Generates a waveform, applies a time shift and the detector response
@@ -762,11 +702,11 @@ class FDomainDetFrameGenerator(BaseFDomainDetFrameGenerator):
         return h
 
     @staticmethod
-    def select_rframe_generator(approximant):
+    def select_rframe_generator(approximant, domain):
         """Returns a radiation frame generator class based on the approximant
         string.
         """
-        return select_waveform_generator(approximant)
+        return select_waveform_generator(approximant, domain)
 
 
 class FDomainDetFrameTwoPolGenerator(BaseFDomainDetFrameGenerator):
@@ -800,21 +740,6 @@ class FDomainDetFrameTwoPolGenerator(BaseFDomainDetFrameGenerator):
 
     Attributes
     ----------
-    location_args : set(['tc', 'ra', 'dec'])
-        The set of location parameters. These are not passed to the rFrame
-        generator class; instead, they are used to apply the detector response
-        function and/or shift the waveform in time. The parameters are:
-
-          * tc: The GPS time of coalescence (should be geocentric time).
-          * ra: Right ascension.
-          * dec: declination
-
-        All of these must be provided in either the variable args or the
-        frozen params if detectors is not None. If detectors
-        is None, tc may optionally be provided.
-
-    Attributes
-    ----------
     detectors : dict
         The dictionary of detectors that antenna patterns are calculated for
         on each call of generate. If no detectors were provided, will be
@@ -841,6 +766,19 @@ class FDomainDetFrameTwoPolGenerator(BaseFDomainDetFrameGenerator):
 
     """
     location_args = set(['tc', 'ra', 'dec'])
+    """ set(['tc', 'ra', 'dec']):
+        The set of location parameters. These are not passed to the rFrame
+        generator class; instead, they are used to apply the detector response
+        function and/or shift the waveform in time. The parameters are:
+
+          * tc: The GPS time of coalescence (should be geocentric time).
+          * ra: Right ascension.
+          * dec: declination
+
+        All of these must be provided in either the variable args or the
+        frozen params if detectors is not None. If detectors
+        is None, tc may optionally be provided.
+    """
 
     def generate(self, **kwargs):
         """Generates a waveform polarizations and applies a time shift.
@@ -907,11 +845,110 @@ class FDomainDetFrameTwoPolGenerator(BaseFDomainDetFrameGenerator):
         return h
 
     @staticmethod
-    def select_rframe_generator(approximant):
+    def select_rframe_generator(approximant, domain):
         """Returns a radiation frame generator class based on the approximant
         string.
         """
-        return select_waveform_generator(approximant)
+        return select_waveform_generator(approximant, domain)
+
+class FDomainDetFrameTwoPolNoRespGenerator(BaseFDomainDetFrameGenerator):
+    """Generates frequency-domain waveform in a specific frame.
+
+    Generates both polarizations of a waveform using the given radiation frame
+    generator class, and applies the time shift. Detector response functions
+    are not applied.
+
+    Parameters
+    ----------
+    rFrameGeneratorClass : class
+        The class to use for generating the waveform in the radiation frame,
+        e.g., FDomainCBCGenerator. This should be the class, not an
+        instance of the class (the class will be initialized with the
+        appropriate arguments internally).
+    detectors : {None, list of strings}
+        The names of the detectors to use. If provided, all location parameters
+        must be included in either the variable args or the frozen params. If
+        None, the generate function will just return the plus polarization
+        returned by the rFrameGeneratorClass shifted by any desired time shift.
+    epoch : {float, lal.LIGOTimeGPS
+        The epoch start time to set the waveform to. A time shift = tc - epoch is
+        applied to waveforms before returning.
+    variable_args : {(), list or tuple}
+        A list or tuple of strings giving the names and order of parameters
+        that will be passed to the generate function.
+    \**frozen_params
+        Keyword arguments setting the parameters that will not be changed from
+        call-to-call of the generate function.
+
+    Attributes
+    ----------
+    detectors : dict
+        The dictionary of detectors that antenna patterns are calculated for
+        on each call of generate. If no detectors were provided, will be
+        ``{'RF': None}``, where "RF" means "radiation frame".
+    detector_names : list
+        The list of detector names. If no detectors were provided, then this
+        will be ['RF'] for "radiation frame".
+    epoch : lal.LIGOTimeGPS
+        The GPS start time of the frequency series returned by the generate function.
+        A time shift is applied to the waveform equal to tc-epoch. Update by using
+        ``set_epoch``.
+    current_params : dict
+        A dictionary of name, value pairs of the arguments that were last
+        used by the generate function.
+    rframe_generator : instance of rFrameGeneratorClass
+        The instance of the radiation-frame generator that is used for waveform
+        generation. All parameters in current_params except for the
+        location params are passed to this class's generate function.
+    frozen_location_args : dict
+        Any location parameters that were included in the frozen_params.
+    variable_args : tuple
+        The list of names of arguments that are passed to the generate
+        function.
+
+    """
+
+    def generate(self, **kwargs):
+        """Generates a waveform polarizations
+
+        Returns
+        -------
+        dict :
+            Dictionary of ``detector names -> (hp, hc)``, where ``hp, hc`` are
+            the plus and cross polarization, respectively.
+        """
+        self.current_params.update(kwargs)
+        hp, hc = self.rframe_generator.generate(**self.current_params)
+        if isinstance(hp, TimeSeries):
+            df = self.current_params['delta_f']
+            hp = hp.to_frequencyseries(delta_f=df)
+            hc = hc.to_frequencyseries(delta_f=df)
+            # time-domain waveforms will not be shifted so that the peak amp
+            # happens at the end of the time series (as they are for f-domain),
+            # so we add an additional shift to account for it
+            tshift = 1./df - abs(hp._epoch)
+            hp = apply_fseries_time_shift(hp, tshift, copy=True)
+            hc = apply_fseries_time_shift(hc, tshift, copy=True)
+
+        hp._epoch = hc._epoch = self._epoch
+        h = {}
+
+        for detname in self.detectors:
+            if self.recalib:
+                # recalibrate with given calibration model
+                hp = self.recalib[detname].map_to_adjust(
+                    hp, **self.current_params)
+                hc = self.recalib[detname].map_to_adjust(
+                    hc, **self.current_params)
+            h[detname] = (hp.copy(), hc.copy())
+        return h
+
+    @staticmethod
+    def select_rframe_generator(approximant, domain):
+        """Returns a radiation frame generator class based on the approximant
+        string.
+        """
+        return select_waveform_generator(approximant, domain)
 
 
 class FDomainDetFrameModesGenerator(BaseFDomainDetFrameGenerator):
@@ -946,21 +983,6 @@ class FDomainDetFrameModesGenerator(BaseFDomainDetFrameGenerator):
 
     Attributes
     ----------
-    location_args : set(['tc', 'ra', 'dec'])
-        The set of location parameters. These are not passed to the rFrame
-        generator class; instead, they are used to apply the detector response
-        function and/or shift the waveform in time. The parameters are:
-
-          * tc: The GPS time of coalescence (should be geocentric time).
-          * ra: Right ascension.
-          * dec: declination
-
-        All of these must be provided in either the variable args or the
-        frozen params if detectors is not None. If detectors
-        is None, tc may optionally be provided.
-
-    Attributes
-    ----------
     detectors : dict
         The dictionary of detectors that antenna patterns are calculated for
         on each call of generate. If no detectors were provided, will be
@@ -987,6 +1009,19 @@ class FDomainDetFrameModesGenerator(BaseFDomainDetFrameGenerator):
 
     """
     location_args = set(['tc', 'ra', 'dec'])
+    """ set(['tc', 'ra', 'dec']):
+        The set of location parameters. These are not passed to the rFrame
+        generator class; instead, they are used to apply the detector response
+        function and/or shift the waveform in time. The parameters are:
+
+          * tc: The GPS time of coalescence (should be geocentric time).
+          * ra: Right ascension.
+          * dec: declination
+
+        All of these must be provided in either the variable args or the
+        frozen params if detectors is not None. If detectors
+        is None, tc may optionally be provided.
+    """
 
     def generate(self, **kwargs):
         """Generates and returns a waveform decompsed into separate modes.
@@ -1062,11 +1097,97 @@ class FDomainDetFrameModesGenerator(BaseFDomainDetFrameGenerator):
         return h
 
     @staticmethod
-    def select_rframe_generator(approximant):
+    def select_rframe_generator(approximant, domain):
         """Returns a radiation frame generator class based on the approximant
         string.
         """
-        return select_waveform_modes_generator(approximant)
+        return select_waveform_modes_generator(approximant, domain)
+
+
+class FDomainDirectDetFrameGenerator(BaseCBCGenerator):
+    """Generates frequency-domain waveforms directly in the detector frame.
+
+    Uses :py:func:`waveform.get_fd_det_waveform` as a generator
+    function to create frequency-domain CBC waveforms that include the detector
+    response.
+
+    For details, on methods and arguments, see :py:class:`BaseCBCGenerator`.
+    """
+    def __init__(
+        self,
+        rFrameGeneratorClass=None,
+        epoch=None,
+        detectors=None,
+        variable_args=(),
+        gates=None,
+        recalib=None,
+        **frozen_params
+    ):
+
+        if rFrameGeneratorClass is not None:
+            raise ValueError(
+                f"{self.__class__.__name__} does not supprt using a radiation "
+                "frame generator class."
+            )
+
+        self.set_epoch(epoch)
+        self.detectors = detectors
+
+        if gates is not None:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not support `gates`"
+            )
+        if recalib is not None:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not support `recalib`"
+            )
+
+        if detectors is None:
+            raise ValueError(
+                f"Must specify detectors to use {self.__class__.__name__}."
+            )
+
+        super().__init__(
+            waveform.get_fd_det_waveform,
+            variable_args=variable_args,
+            **frozen_params
+        )
+
+    def set_epoch(self, epoch):
+        """Sets the epoch; epoch should be a float or a LIGOTimeGPS."""
+        self._epoch = float(epoch)
+
+    @property
+    def epoch(self):
+        """The GPS start time of the frequency series returned by the generate
+        function. A time shift is applied to the waveform equal to tc-epoch.
+        Update by using ``set_epoch``
+        """
+        return _lal.LIGOTimeGPS(self._epoch)
+
+    @staticmethod
+    def select_rframe_generator(approximant):
+        """Returns the radiation frame generator.
+
+        Returns ``None`` since this class does not support generating waveforms
+        in the radiation frame.
+        """
+        return None
+
+    def generate(self, **kwargs):
+        """Generates and returns a waveform in the detector frame.
+
+        Returns
+        -------
+        dict :
+            Dictionary of ``detector names -> h``, where is the waveform in the
+            specified detector.
+        """
+        wfs = super().generate(ifos=self.detectors, **kwargs)
+        for det in self.detectors:
+            wfs[det]._epoch = self._epoch
+            wfs[det] = apply_fd_time_shift(wfs[det], kwargs["tc"], copy=False)
+        return wfs
 
 
 #
@@ -1077,8 +1198,40 @@ class FDomainDetFrameModesGenerator(BaseFDomainDetFrameGenerator):
 # =============================================================================
 #
 
+def get_td_generator(approximant, modes=False):
+    """Returns the time-domain generator for the given approximant."""
+    if approximant in waveform.td_approximants():
+        if modes:
+            return TDomainCBCModesGenerator
+        return TDomainCBCGenerator
 
-def select_waveform_generator(approximant):
+    if approximant in ringdown.ringdown_td_approximants:
+        if approximant == 'TdQNMfromFinalMassSpin':
+            return TDomainMassSpinRingdownGenerator
+        return TDomainFreqTauRingdownGenerator
+
+    if approximant in supernovae.supernovae_td_approximants:
+        return TDomainSupernovaeGenerator
+
+    raise ValueError(f"No time-domain generator found for "
+                       "approximant: {approximant}")
+
+def get_fd_generator(approximant, modes=False):
+    """Returns the frequency-domain generator for the given approximant."""
+    if approximant in waveform.fd_approximants():
+        if modes:
+            return FDomainCBCModesGenerator
+        return FDomainCBCGenerator
+
+    if approximant in ringdown.ringdown_fd_approximants:
+        if approximant == 'FdQNMfromFinalMassSpin':
+            return FDomainMassSpinRingdownGenerator
+        return FDomainFreqTauRingdownGenerator
+
+    raise ValueError(f"No frequency-domain generator found for "
+                       "approximant: {approximant}")
+
+def select_waveform_generator(approximant, domain=None):
     """Returns the single-IFO generator for the approximant.
 
     Parameters
@@ -1086,6 +1239,9 @@ def select_waveform_generator(approximant):
     approximant : str
         Name of waveform approximant. Valid names can be found using
         ``pycbc.waveform`` methods.
+    domain : str or None
+        Name of the preferred waveform domain
+        ('td' for time domain, 'fd' for frequency domain, None for default)
 
     Returns
     -------
@@ -1105,33 +1261,22 @@ def select_waveform_generator(approximant):
     >>> from pycbc.waveform.generator import select_waveform_generator
     >>> select_waveform_generator(waveform.fd_approximants()[0])
     """
-    # check if frequency-domain CBC waveform
-    if approximant in waveform.fd_approximants():
-        return FDomainCBCGenerator
-    # check if time-domain CBC waveform
-    elif approximant in waveform.td_approximants():
-        return TDomainCBCGenerator
-    # check if frequency-domain ringdown waveform
-    elif approximant in ringdown.ringdown_fd_approximants:
-        if approximant == 'FdQNMfromFinalMassSpin':
-            return FDomainMassSpinRingdownGenerator
-        elif approximant == 'FdQNMfromFreqTau':
-            return FDomainFreqTauRingdownGenerator
-    elif approximant in ringdown.ringdown_td_approximants:
-        if approximant == 'TdQNMfromFinalMassSpin':
-            return TDomainMassSpinRingdownGenerator
-        elif approximant == 'TdQNMfromFreqTau':
-            return TDomainFreqTauRingdownGenerator
-    # check if supernovae waveform:
-    elif approximant in supernovae.supernovae_td_approximants:
-        if approximant == 'CoreCollapseBounce':
-            return TDomainSupernovaeGenerator
-    # otherwise waveform approximant is not supported
-    else:
-        raise ValueError("%s is not a valid approximant." % approximant)
 
+    if domain not in {None, 'td', 'fd'}:
+        raise ValueError(f"Invalid domain '{domain}'. "
+                          "Must be one of: None, 'td', or 'fd'.")
 
-def select_waveform_modes_generator(approximant):
+    if domain == 'td':
+        return get_td_generator(approximant)
+    elif domain == 'fd':
+        return get_fd_generator(approximant)
+    elif domain is None:
+        try:
+            return get_fd_generator(approximant)
+        except ValueError:
+            return get_td_generator(approximant)
+
+def select_waveform_modes_generator(approximant, domain=None):
     """Returns the single-IFO modes generator for the approximant.
 
     Parameters
@@ -1139,17 +1284,26 @@ def select_waveform_modes_generator(approximant):
     approximant : str
         Name of waveform approximant. Valid names can be found using
         ``pycbc.waveform`` methods.
+    domain : str or None
+        Name of the preferred waveform domain
+        ('td' for time domain, 'fd' for frequency domain, None for default)
 
     Returns
     -------
     generator : (PyCBC generator instance)
-        A waveform generator object.
+        A waveform modes generator object.
     """
-    # check if frequency-domain CBC waveform
-    if approximant in waveform.fd_approximants():
-        return FDomainCBCModesGenerator
-    # check if time-domain CBC waveform
-    elif approximant in waveform.td_approximants():
-        return TDomainCBCModesGenerator
-    # otherwise waveform approximant is not supported
-    raise ValueError("%s is not a valid approximant." % approximant)
+
+    if domain not in {None, 'td', 'fd'}:
+        raise ValueError(f"Invalid domain '{domain}'. "
+                           "Must be one of: None, 'td', or 'fd'.")
+
+    if domain == 'td':
+        return get_td_generator(approximant, modes=True)
+    elif domain == 'fd':
+        return get_fd_generator(approximant, modes=True)
+    elif domain is None:
+        try:
+            return get_fd_generator(approximant, modes=True)
+        except ValueError:
+            return get_td_generator(approximant, modes=True)

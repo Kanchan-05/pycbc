@@ -2,13 +2,14 @@
 import os
 import logging
 import shutil
-from six.moves import configparser as ConfigParser
+import configparser as ConfigParser
 import subprocess
 import glob
 import tempfile
-from optparse import OptionParser
+from argparse import ArgumentParser
 from glue.pipeline import CondorDAGJob, CondorDAGNode, CondorDAG, CondorJob
 
+from pycbc import init_logging, add_common_pycbc_options
 
 class BaseJob(CondorDAGJob, CondorJob):
     def __init__(self, log_dir, executable, cp, section, accounting_group=None):
@@ -28,6 +29,8 @@ class BaseJob(CondorDAGJob, CondorJob):
 
         if accounting_group:
             self.add_condor_cmd('accounting_group', accounting_group)
+
+        self.add_condor_cmd('request_disk', 1024)
 
 class FaithsimNode(CondorDAGNode):
     def __init__(self, job, tmplt_file, match_file, inj_per_job=None):
@@ -56,14 +59,13 @@ def matches_in_list(slist, match):
             matches.append(st)
     return matches
 
-parser = OptionParser()
-parser.add_option('--config', type=str)          
-(options, args) = parser.parse_args() 
+parser = ArgumentParser()
+add_common_pycbc_options(parser)
+parser.add_argument('--config', type=str, required=True)
+options = parser.parse_args() 
 
-if options.config is None:
-    raise ValueError("Config file is required")
-
-logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
+# Default logging level is info: --verbose adds to this
+init_logging(options.verbose, default_level=1)
 
 confs = ConfigParser.ConfigParser()
 confs.read(options.config)
@@ -84,8 +86,10 @@ try:
     accounting_group = confs.get('workflow', 'accounting-group')
 except:
     accounting_group = None
-    logging.warn('Warning: accounting-group not specified, LDG clusters may'
-                 ' reject this workflow!')
+    logging.warning(
+        'Warning: accounting-group not specified, LDG clusters may '
+        'reject this workflow!'
+    )
 
 logging.info("Making workspace directories")
 mkdir('scripts')
@@ -114,7 +118,6 @@ logging.info("Creating DAG")
 
 dag = CondorDAG(logfile)
 dag.set_dag_file("faithsim")
-dag.set_dax_file("faithsim")
 
 fs_secs = matches_in_list(confs.sections(), 'faithsim')
 fsjobs = []
@@ -130,7 +133,7 @@ pjob = BaseJob("log", "scripts/pycbc_faithsim_plots", None, 'faithsim_plots',
 pnode = CondorDAGNode(pjob)
 
 for inj_num in range(num_banks):
-    bn = 'bank/bank' + str(inj_num) + '.xml'
+    bn = 'bank/bank' + str(inj_num) + '.xml.gz'
     
     for fsjob, sec in zip(fsjobs, fs_secs):
         sec_sub = str(sec[len('faithsim'):])
@@ -144,14 +147,11 @@ dag.add_node(pnode)
 
 f = open("scripts/pycbc_faithsim_collect_results", "w")
 f.write("""#!/usr/bin/env python
-from os.path import isfile
 from numpy import *
-from glue.ligolw import utils, table, lsctables, ligolw
+from ligo.lw import utils, table, lsctables
 import glob
+from pycbc.io.ligolw import LIGOLWContentHandler
 
-class ContentHandler(ligolw.LIGOLWContentHandler):
-    pass
-lsctables.use_in(ContentHandler)
 
 fils = glob.glob("match/match*.dat")
 mfields = ('match', 'overlap', 'time_offset', 'sigma1', 'sigma2')
@@ -176,10 +176,10 @@ if __name__ == "__main__":
         data = zeros(0, dtype=dtypeo)   
         for part in parts:
             btag = part.split('-')[2].split('.')[0]
-            bname = "bank/bank" + btag + ".xml"
+            bname = "bank/bank" + btag + ".xml.gz"
             if bname not in btables:
-                indoc = utils.load_filename(bname, False, contenthandler=ContentHandler)
-                btables[bname] = table.get_table(indoc, lsctables.SimInspiralTable.tableName) 
+                indoc = utils.load_filename(bname, False, contenthandler=LIGOLWContentHandler)
+                btables[bname] = lsctables.SimInspiralTable.get_table(indoc)
             bt = btables[bname]
             try:      
                 md = loadtxt(part, dtype=dtypem)
@@ -218,9 +218,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.cm
 import pylab
-from os.path import isfile
 from numpy import *
-from glue.ligolw import utils, table, lsctables
+from ligo.lw import utils, table, lsctables
 from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 import glob
 

@@ -1,7 +1,9 @@
 #!/bin/env python
-import numpy, argparse, pycbc.version, pycbc.pnutils, logging
+import numpy, argparse, pycbc.pnutils, logging
 from pycbc.events import veto
-from glue.ligolw import ligolw, table, lsctables, utils as ligolw_utils
+from pycbc.io.ligolw import LIGOLWContentHandler
+from ligo.lw import ligolw, table, utils as ligolw_utils
+
 
 effd = {"H1":"eff_dist_h", "L1":"eff_dist_l", "V1":"eff_dist_v"}
 def remove(l, i):
@@ -9,14 +11,8 @@ def remove(l, i):
     for r in to_remove:
         l.remove(r)
 
-# dummy class needed for loading LIGOLW files
-class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
-    pass
-lsctables.use_in(LIGOLWContentHandler)
-
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', action='version', version=pycbc.version.git_verbose_msg)
-parser.add_argument('--verbose', action='store_true')
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument('--injection-file')
 parser.add_argument('--veto-file', 
                       help="File containing segments used to veto injections")
@@ -30,7 +26,7 @@ pycbc.init_logging(args.verbose)
 
 logging.info('File: %s' % args.injection_file)
 indoc = ligolw_utils.load_filename(args.injection_file, False, contenthandler=LIGOLWContentHandler)
-sim_table = table.get_table(indoc, 'sim_inspiral')
+sim_table = table.Table.get_table(indoc, 'sim_inspiral')
 
 logging.info('%s Injections in file' % len(sim_table))
 

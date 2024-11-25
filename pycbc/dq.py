@@ -29,9 +29,10 @@ import logging
 import json
 import numpy
 from ligo.segments import segmentlist, segment
-from pycbc.frame.losc import get_run
+from pycbc.frame.gwosc import get_run
 from pycbc.io import get_file
 
+logger = logging.getLogger('pycbc.dq')
 
 def parse_veto_definer(veto_def_filename, ifos):
     """ Parse a veto definer file from the filename and return a dictionary
@@ -51,9 +52,8 @@ def parse_veto_definer(veto_def_filename, ifos):
         Returns a dictionary first indexed by ifo, then category level, and
         finally a list of veto definitions.
     """
-    from glue.ligolw import table, lsctables, utils as ligolw_utils
-    from glue.ligolw.ligolw import LIGOLWContentHandler as h
-    lsctables.use_in(h)
+    from ligo.lw import table, utils as ligolw_utils
+    from pycbc.io.ligolw import LIGOLWContentHandler as h
 
     data = {}
     for ifo_name in ifos:
@@ -64,7 +64,7 @@ def parse_veto_definer(veto_def_filename, ifos):
 
     indoc = ligolw_utils.load_filename(veto_def_filename, False,
                                        contenthandler=h)
-    veto_table = table.get_table(indoc, 'veto_definer')
+    veto_table = table.Table.get_table(indoc, 'veto_definer')
 
     ifo = veto_table.getColumnByName('ifo')
     name = veto_table.getColumnByName('name')
@@ -102,7 +102,7 @@ def parse_veto_definer(veto_def_filename, ifos):
     return data
 
 
-GWOSC_URL = 'https://www.gw-openscience.org/timeline/segments/json/{}/{}_{}/{}/{}/'
+GWOSC_URL = 'https://www.gwosc.org/timeline/segments/json/{}/{}_{}/{}/{}/'
 
 
 def query_dqsegdb2(detector, flag_name, start_time, end_time, server):
@@ -118,10 +118,10 @@ def query_dqsegdb2(detector, flag_name, start_time, end_time, server):
                                    host=server)
         return query_res['active']
     except Exception as e:
-        logging.error('Could not query segment database, check name '
-                      '(%s), times (%d-%d) and server (%s)',
-                      complete_flag, int(start_time), int(end_time),
-                      server)
+        logger.error('Could not query segment database, check name '
+                     '(%s), times (%d-%d) and server (%s)',
+                     complete_flag, int(start_time), int(end_time),
+                     server)
         raise e
 
 def query_flag(ifo, segment_name, start_time, end_time,
@@ -134,9 +134,9 @@ def query_flag(ifo, segment_name, start_time, end_time,
     ifo: string
         The interferometer to query (H1, L1).
     segment_name: string
-        The status flag to query from LOSC.
+        The status flag to query from GWOSC.
     start_time: int
-        The starting gps time to begin querying from LOSC
+        The starting gps time to begin querying from GWOSC
     end_time: int
         The end gps time of the query
     source: str, Optional
@@ -152,13 +152,13 @@ def query_flag(ifo, segment_name, start_time, end_time,
 
     Returns
     ---------
-    segments: glue.segments.segmentlist
+    segments: ligo.segments.segmentlist
         List of segments
     """
     flag_segments = segmentlist([])
 
     if source in ['GWOSC', 'any']:
-        # Special cases as the LOSC convention is backwards from normal
+        # Special cases as the GWOSC convention is backwards from normal
         # LIGO / Virgo operation!!!!
         if (('_HW_INJ' in segment_name and 'NO' not in segment_name) or
                 'VETO' in segment_name):
@@ -254,9 +254,9 @@ def query_cumulative_flags(ifo, segment_names, start_time, end_time,
         The interferometer to query (H1, L1). If a dict, an element for each
         flag name must be provided.
     segment_name: list of strings
-        The status flag to query from LOSC.
+        The status flag to query from GWOSC.
     start_time: int
-        The starting gps time to begin querying from LOSC
+        The starting gps time to begin querying from GWOSC
     end_time: int
         The end gps time of the query
     source: str, Optional
@@ -279,7 +279,7 @@ def query_cumulative_flags(ifo, segment_names, start_time, end_time,
 
     Returns
     ---------
-    segments: glue.segments.segmentlist
+    segments: ligo.segments.segmentlist
         List of segments
     """
     total_segs = segmentlist([])

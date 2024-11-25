@@ -29,7 +29,6 @@ import pycbc
 from pycbc import results
 from pycbc.inference import io
 
-from pycbc import __version__
 from pycbc.inference import option_utils
 from pycbc.inference.sampler import samplers
 
@@ -38,11 +37,7 @@ from pycbc.inference.sampler import samplers
 parser = io.ResultsArgumentParser(skip_args='thin-interval',
                                   description="Plots autocorrelation function "
                                               "from inference samples.")
-# verbose option
-parser.add_argument("--verbose", action="store_true", default=False,
-    help="Print logging info.")
-parser.add_argument('--version', action='version', version=__version__,
-                    help='show version number and exit')
+pycbc.add_common_pycbc_options(parser)
 # output plot options
 parser.add_argument("--output-file", type=str, required=True,
                     help="Path to output plot.")

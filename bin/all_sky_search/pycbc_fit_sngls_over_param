@@ -12,15 +12,16 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
 # Public License for more details.
 
-from __future__ import division
 
-import sys, h5py
+import sys
 import argparse, logging
 
 import numpy as np
 
+import pycbc
+from pycbc import init_logging
+from pycbc.io import HFile
 from pycbc.events import triggers
-import pycbc.version
 
 parser = argparse.ArgumentParser(usage="",
     description="Smooth (regress) the dependence of coefficients describing "
@@ -28,9 +29,7 @@ parser = argparse.ArgumentParser(usage="",
                 "parameter, to suppress random noise in the resulting "
                 "background model.")
 
-parser.add_argument("--version", action=pycbc.version.Version)
-parser.add_argument("-V", "--verbose", action="store_true",
-                    help="Print extra debugging information", default=False)
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument("--template-fit-file",
                     help="Input hdf5 file containing fit coefficients for each"
                          " individual template. Required")
@@ -79,13 +78,9 @@ args = parser.parse_args()
 if args.regression_method == 'nn' and args.num_neighbors < 1:
     raise RuntimeError("Need to give a positive number of nearest neighbors!")
 
-if args.verbose:
-    log_level = logging.DEBUG
-else:
-    log_level = logging.WARN
-logging.basicConfig(format='%(asctime)s : %(message)s', level=log_level)
+init_logging(args.verbose)
 
-fits = h5py.File(args.template_fit_file, 'r')
+fits = HFile(args.template_fit_file, 'r')
 
 # get the ifo from the template-level fit
 ifo = fits.attrs['ifo']
@@ -101,7 +96,7 @@ if args.use_template_fit_param:
 
 else:
     logging.info('Calculating template parameter values')
-    bank = h5py.File(args.bank_file, 'r')
+    bank = HFile(args.bank_file, 'r')
     m1, m2, s1z, s2z = triggers.get_mass_spin(bank, tid)
     parvals = triggers.get_param(args.fit_param, args, m1, m2, s1z, s2z) 
 
@@ -111,7 +106,6 @@ else:
     tcount = False
 
 nabove = fits['count_above_thresh'][:]
-nabove = nabove/np.mean(nabove)
 if tcount: ntotal = fits['count_in_template'][:]
 # for an exponential fit 1/alpha is linear in the trigger statistic values
 # so taking weighted sums/averages of 1/alpha is appropriate
@@ -189,7 +183,7 @@ elif args.regression_method == 'tricube':
         ntotal_smoothed.append(nt_sm)
 
 # store template-dependent fit output
-outfile = h5py.File(args.output, 'w')
+outfile = HFile(args.output, 'w')
 outfile.create_dataset('template_id', data=tid)
 outfile.create_dataset('count_above_thresh', data=nabove_smoothed)
 if tcount: outfile.create_dataset('count_in_template', data=ntotal_smoothed)

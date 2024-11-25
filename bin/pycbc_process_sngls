@@ -6,12 +6,14 @@ import argparse
 import logging
 import numpy
 import h5py
-from pycbc.io import SingleDetTriggers
+
+import pycbc
+from pycbc.io import SingleDetTriggers, HFile
 from pycbc.events import stat, coinc, veto
 
 
 parser = argparse.ArgumentParser(description=__doc__)
-
+pycbc.add_common_pycbc_options(parser)
 parser.add_argument('--single-trig-file', required=True,
                     help='Path to file containing single-detector triggers in '
                          'HDF5 format. Required')
@@ -41,7 +43,7 @@ stat.insert_statistic_option_group(parser)
 
 args = parser.parse_args()
 
-logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
+pycbc.init_logging(args.verbose)
 
 # Munge together SNR cut and any other filter specified
 snr_filter = 'self.snr>%f' % (args.min_snr) if args.min_snr > 0. else None 
@@ -57,9 +59,14 @@ else:
 if filter_func is not None:
     logging.info('Will filter trigs using %s', filter_func)
 # Filter will be stored as self.mask attribute of sngls instance
-sngls = SingleDetTriggers(args.single_trig_file, args.bank_file,
-                          args.veto_file, args.segment_name, filter_func,
-                          args.detector)
+sngls = SingleDetTriggers(
+    args.single_trig_file,
+    args.detector,
+    bank_file=args.bank_file,
+    veto_file=args.veto_file,
+    segment_name=args.segment_name,
+    filter_func=filter_func,
+)
 
 logging.info('Calculating stat')
 rank_method = stat.get_statistic_from_opts(args, [args.detector])
@@ -71,13 +78,14 @@ stat = rank_method.rank_stat_single(sngl_info)[sngls.mask]
 
 logging.info('%i stat values found', len(stat))
 
-outfile = h5py.File(args.output_file, 'w')
+outfile = HFile(args.output_file, 'w')
 outgroup = outfile.create_group(args.detector)
 
 if args.cluster_window is not None:
-    logging.info('Clustering over time')
+    logging.info('Clustering events over %s s window', args.cluster_window)
     out_idx = coinc.cluster_over_time(stat, sngls.end_time,
                                       window=args.cluster_window)
+    logging.info('%d triggers remaining', len(out_idx))
     outgroup['cluster_window'] = args.cluster_window
 else:
     out_idx = numpy.arange(len(sngls.end_time))
@@ -85,7 +93,7 @@ else:
 logging.info('Writing %i triggers', len(out_idx))
 
 # get the columns to copy over
-with h5py.File(args.single_trig_file, 'r') as trigfile:
+with HFile(args.single_trig_file, 'r') as trigfile:
     cnames = []
     # only keep datasets parallel to the original trigger list
     for n, col in trigfile[args.detector].items():
@@ -101,8 +109,11 @@ if args.store_bank_values:
         if n == 'template_hash':
             continue
         if not hasattr(sngls, n):
-            logging.warn("Bank's %s dataset or group is not supported "
-                         "by SingleDetTriggers, ignoring it", n)
+            logging.warning(
+                "Bank's %s dataset or group is not supported "
+                "by SingleDetTriggers, ignoring it",
+                n
+            )
             continue
         # don't repeat things that already came from the trigger file
         # (e.g. template_duration)

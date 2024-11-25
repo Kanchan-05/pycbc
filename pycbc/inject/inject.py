@@ -27,43 +27,34 @@
 
 import os
 import numpy as np
-import lal
 import copy
 import logging
 from abc import ABCMeta, abstractmethod
-import lalsimulation as sim
-import h5py
-from pycbc import waveform
-from pycbc import frame
+
+import lal
+from ligo.lw import utils as ligolw_utils, ligolw, lsctables
+
+from pycbc import waveform, frame, libutils
 from pycbc.opt import LimitedSizeDict
-from pycbc.waveform import get_td_waveform, utils as wfutils
+from pycbc.waveform import (get_td_waveform, fd_det,
+                            get_td_det_waveform_from_fd_det)
+from pycbc.waveform import utils as wfutils
 from pycbc.waveform import ringdown_td_approximants
 from pycbc.types import float64, float32, TimeSeries, load_timeseries
 from pycbc.detector import Detector
 from pycbc.conversions import tau0_from_mass1_mass2
 from pycbc.filter import resample_to_delta_t
 import pycbc.io
+from pycbc.io.ligolw import LIGOLWContentHandler
 
-from six import add_metaclass
+logger = logging.getLogger('pycbc.inject.inject')
+
+sim = libutils.import_optional('lalsimulation')
 
 injection_func_map = {
-    np.dtype(float32): sim.SimAddInjectionREAL4TimeSeries,
-    np.dtype(float64): sim.SimAddInjectionREAL8TimeSeries
+    np.dtype(float32): lambda *args: sim.SimAddInjectionREAL4TimeSeries(*args),
+    np.dtype(float64): lambda *args: sim.SimAddInjectionREAL8TimeSeries(*args),
 }
-
-
-#
-# Remove everything between the dashed lines once we get rid of xml
-# -----------------------------------------------------------------------------
-#
-from glue.ligolw import utils as ligolw_utils
-from glue.ligolw import ligolw, table, lsctables
-
-# dummy class needed for loading LIGOLW files
-class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
-    pass
-
-lsctables.use_in(LIGOLWContentHandler)
 
 # Map parameter names used in pycbc to names used in the sim_inspiral
 # table, if they are different
@@ -83,6 +74,9 @@ def set_sim_data(inj, field, data):
     if sim_field == 'tc':
         inj.geocent_end_time = int(data)
         inj.geocent_end_time_ns = int(1e9*(data % 1))
+    # for spin1 and spin2 we need data to be an array
+    if sim_field in ['spin1', 'spin2']:
+        setattr(inj, sim_field, [0, 0, data])
     else:
         setattr(inj, sim_field, data)
 
@@ -101,7 +95,7 @@ def projector(detector_name, inj, hp, hc, distance_scale=1):
         ra = inj.ra
         dec = inj.dec
     except:
-        tc = inj.get_time_geocent()
+        tc = inj.time_geocent
         ra = inj.longitude
         dec = inj.latitude
 
@@ -120,7 +114,7 @@ def projector(detector_name, inj, hp, hc, distance_scale=1):
     if hasattr(inj, 'detector_projection_method'):
         projection_method = inj.detector_projection_method
 
-    logging.info('Injecting at %s, method is %s', tc, projection_method)
+    logger.info('Injecting at %s, method is %s', tc, projection_method)
 
     # compute the detector response and add it to the strain
     signal = detector.project_wave(hp_tapered, hc_tapered,
@@ -164,7 +158,7 @@ class _XMLInjectionSet(object):
     def __init__(self, sim_file, **kwds):
         self.indoc = ligolw_utils.load_filename(
             sim_file, False, contenthandler=LIGOLWContentHandler)
-        self.table = table.get_table(self.indoc, lsctables.SimInspiralTable.tableName)
+        self.table = lsctables.SimInspiralTable.get_table(self.indoc)
         self.extra_args = kwds
 
     def apply(self, strain, detector_name, f_lower=None, distance_scale=1,
@@ -228,11 +222,11 @@ class _XMLInjectionSet(object):
             f_l = inj.f_lower if f_lower is None else f_lower
             # roughly estimate if the injection may overlap with the segment
             # Add 2s to end_time to account for ringdown and light-travel delay
-            end_time = inj.get_time_geocent() + 2
+            end_time = inj.time_geocent + 2
             inj_length = tau0_from_mass1_mass2(inj.mass1, inj.mass2, f_l)
             # Start time is taken as twice approx waveform length with a 1s
             # safety buffer
-            start_time = inj.get_time_geocent() - 2 * (inj_length + 1)
+            start_time = inj.time_geocent - 2 * (inj_length + 1)
             if end_time < t0 or start_time > t1:
                 continue
             signal = self.make_strain_from_inj_object(inj, delta_t,
@@ -298,7 +292,7 @@ class _XMLInjectionSet(object):
 
     def end_times(self):
         """Return the end times of all injections"""
-        return [inj.get_time_geocent() for inj in self.table]
+        return [inj.time_geocent for inj in self.table]
 
     @staticmethod
     def write(filename, samples, write_params=None, static_args=None):
@@ -337,15 +331,13 @@ class _XMLInjectionSet(object):
             for (field, value) in static_args.items():
                 set_sim_data(sim, field, value)
             simtable.append(sim)
-        ligolw_utils.write_filename(xmldoc, filename,
-                                    gz=filename.endswith('gz'))
+        ligolw_utils.write_filename(xmldoc, filename, compress='auto')
 
 
 # -----------------------------------------------------------------------------
 
 
-@add_metaclass(ABCMeta)
-class _HDFInjectionSet(object):
+class _HDFInjectionSet(metaclass=ABCMeta):
     """Manages sets of injections: reads injections from hdf files
     and injects them into time series.
 
@@ -359,7 +351,6 @@ class _HDFInjectionSet(object):
 
     Attributes
     ----------
-    filehandler
     table
     static_args
     extra_args
@@ -367,15 +358,15 @@ class _HDFInjectionSet(object):
         Parameter names that must exist in the injection HDF file in order to
         create an injection of that type.
     """
+
     _tableclass = pycbc.io.FieldArray
     injtype = None
     required_params = ()
 
     def __init__(self, sim_file, hdf_group=None, **kwds):
         # open the file
-        fp = h5py.File(sim_file, 'r')
+        fp = pycbc.io.HFile(sim_file, 'r')
         group = fp if hdf_group is None else fp[hdf_group]
-        self.filehandler = fp
         # get parameters
         parameters = list(group.keys())
         # get all injection parameter values
@@ -424,6 +415,7 @@ class _HDFInjectionSet(object):
         self.table = self._tableclass.from_kwargs(**injvals)
         # save the extra arguments
         self.extra_args = kwds
+        fp.close()
 
     @abstractmethod
     def apply(self, strain, detector_name, distance_scale=1,
@@ -469,11 +461,11 @@ class _HDFInjectionSet(object):
         \**metadata :
             All other keyword arguments will be written to the file's attrs.
         """
-        with h5py.File(filename, 'w') as fp:
+        with pycbc.io.HFile(filename, 'w') as fp:
             # write metadata
             if static_args is None:
                 static_args = {}
-            fp.attrs["static_args"] = list(static_args.keys())
+            fp.attrs["static_args"] = list(map(str, static_args.keys()))
             fp.attrs['injtype'] = cls.injtype
             for key, val in metadata.items():
                 fp.attrs[key] = val
@@ -546,9 +538,13 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
                     + str(strain.dtype))
 
         lalstrain = strain.lal()
-        earth_travel_time = lal.REARTH_SI / lal.C_SI
-        t0 = float(strain.start_time) - earth_travel_time
-        t1 = float(strain.end_time) + earth_travel_time
+        if self.table[0]['approximant'] in fd_det:
+            t0 = float(strain.start_time)
+            t1 = float(strain.end_time)
+        else:
+            earth_travel_time = lal.REARTH_SI / lal.C_SI
+            t0 = float(strain.start_time) - earth_travel_time
+            t1 = float(strain.end_time) + earth_travel_time
 
         # pick lalsimulation injection function
         add_injection = injection_func_map[strain.dtype]
@@ -560,6 +556,8 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
         injections = self.table
         if simulation_ids:
             injections = injections[list(simulation_ids)]
+
+        injected_ids = []
         for ii, inj in enumerate(injections):
             f_l = inj.f_lower if f_lower is None else f_lower
             # roughly estimate if the injection may overlap with the segment
@@ -581,15 +579,23 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
             signal = signal.astype(strain.dtype)
             signal_lal = signal.lal()
             add_injection(lalstrain, signal_lal, None)
+            injected_ids.append(ii)
             if inj_filter_rejector is not None:
                 inj_filter_rejector.generate_short_inj_from_inj(signal, ii)
 
         strain.data[:] = lalstrain.data.data[:]
 
         injected = copy.copy(self)
-        injected.table = injections
+        injected.table = injections[np.array(injected_ids).astype(int)]
         if inj_filter_rejector is not None:
+            if hasattr(inj_filter_rejector, 'injected'):
+                prev_p = inj_filter_rejector.injection_params
+                prev_id = inj_filter_rejector.injection_ids
+                injected = np.concatenate([prev_p, injected])
+                injected_ids = np.concatenate([prev_id, injected_ids])
+
             inj_filter_rejector.injection_params = injected
+            inj_filter_rejector.injection_ids = injected_ids
         return injected
 
     def make_strain_from_inj_object(self, inj, delta_t, detector_name,
@@ -623,11 +629,18 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
         else:
             f_l = f_lower
 
-        # compute the waveform time series
-        hp, hc = get_td_waveform(inj, delta_t=delta_t, f_lower=f_l,
-                                 **self.extra_args)
-        return projector(detector_name,
-                         inj, hp, hc, distance_scale=distance_scale)
+        if inj['approximant'] in fd_det:
+            strain = get_td_det_waveform_from_fd_det(
+                        inj, delta_t=delta_t, f_lower=f_l,
+                        ifos=detector_name, **self.extra_args)[detector_name]
+            strain /= distance_scale
+        else:
+            # compute the waveform time series
+            hp, hc = get_td_waveform(inj, delta_t=delta_t, f_lower=f_l,
+                                     **self.extra_args)
+            strain = projector(detector_name,
+                               inj, hp, hc, distance_scale=distance_scale)
+        return strain
 
     def end_times(self):
         """Return the end times of all injections"""
@@ -639,6 +652,7 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
         for d in [waveform.waveform.td_wav, waveform.waveform.fd_wav]:
             for key in d:
                 all_apprxs.extend(d[key])
+        all_apprxs.extend(waveform.waveform.fd_det)
         return list(set(all_apprxs))
 
 
@@ -650,7 +664,8 @@ class RingdownHDFInjectionSet(_HDFInjectionSet):
     required_params = ('tc',)
 
     def apply(self, strain, detector_name, distance_scale=1,
-              simulation_ids=None, inj_filter_rejector=None):
+              simulation_ids=None, inj_filter_rejector=None,
+              injection_sample_rate=None):
         """Add injection (as seen by a particular detector) to a time series.
 
         Parameters
@@ -667,6 +682,8 @@ class RingdownHDFInjectionSet(_HDFInjectionSet):
         inj_filter_rejector: InjFilterRejector instance, optional
             Not implemented. If not ``None``, a ``NotImplementedError`` will
             be raised.
+        injection_sample_rate: float, optional
+            The sample rate to generate the signal before injection
 
         Returns
         -------
@@ -691,14 +708,19 @@ class RingdownHDFInjectionSet(_HDFInjectionSet):
         # pick lalsimulation injection function
         add_injection = injection_func_map[strain.dtype]
 
+        delta_t = strain.delta_t
+        if injection_sample_rate is not None:
+            delta_t = 1.0 / injection_sample_rate
+
         injections = self.table
         if simulation_ids:
             injections = injections[list(simulation_ids)]
         for ii in range(injections.size):
             injection = injections[ii]
             signal = self.make_strain_from_inj_object(
-                injection, strain.delta_t, detector_name,
+                injection, delta_t, detector_name,
                 distance_scale=distance_scale)
+            signal = resample_to_delta_t(signal, strain.delta_t, method='ldas')
             signal = signal.astype(strain.dtype)
             signal_lal = signal.lal()
             add_injection(lalstrain, signal_lal, None)
@@ -1011,7 +1033,7 @@ def get_hdf_injtype(sim_file):
     HDFInjectionSet :
         The type of HDFInjectionSet to use.
     """
-    with h5py.File(sim_file, 'r') as fp:
+    with pycbc.io.HFile(sim_file, 'r') as fp:
         try:
             ftype = fp.attrs['injtype']
         except KeyError:
@@ -1175,8 +1197,7 @@ class SGBurstInjectionSet(object):
     def __init__(self, sim_file, **kwds):
         self.indoc = ligolw_utils.load_filename(
             sim_file, False, contenthandler=LIGOLWContentHandler)
-        self.table = table.get_table(
-            self.indoc, lsctables.SimBurstTable.tableName)
+        self.table = lsctables.SimBurstTable.get_table(self.indoc)
         self.extra_args = kwds
 
     def apply(self, strain, detector_name, f_lower=None, distance_scale=1):
@@ -1219,7 +1240,7 @@ class SGBurstInjectionSet(object):
 
         for inj in self.table:
             # roughly estimate if the injection may overlap with the segment
-            end_time = inj.get_time_geocent()
+            end_time = inj.time_geocent
             #CHECK: This is a hack (10.0s); replace with an accurate estimate
             inj_length = 10.0
             eccentricity = 0.0

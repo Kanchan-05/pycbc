@@ -17,14 +17,18 @@
 """This module is responsible for setting up PSD-related jobs in workflows.
 """
 
-from six.moves import range
-from pycbc.workflow.core import FileList, make_analysis_dir, Executable, File
-from pycbc.workflow.core import SegFile
+import logging
+
 from ligo.segments import segmentlist
+
+from pycbc.workflow.core import FileList, make_analysis_dir, Executable
+from pycbc.workflow.core import SegFile
+
+logger = logging.getLogger('pycbc.workflow.psd')
+
 
 class CalcPSDExecutable(Executable):
     current_retention_level = Executable.ALL_TRIGGERS
-    file_input_options = ['--gating-file']
 
 class MergePSDFiles(Executable):
     current_retention_level = Executable.MERGED_TRIGGERS
@@ -75,10 +79,7 @@ def setup_psd_calculate(workflow, frame_files, ifo, segments,
                                     segment_name, out_dir,
                                     tags=tags + ['PART%s' % i])]
 
-    if num_parts > 1:
-        return merge_psds(workflow, psd_files, ifo, out_dir, tags=tags)
-    else:
-        return psd_files[0]
+    return merge_psds(workflow, psd_files, ifo, out_dir, tags=tags)
 
 def make_psd_file(workflow, frame_files, segment_file, segment_name, out_dir,
                   tags=None):

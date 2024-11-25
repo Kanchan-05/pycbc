@@ -24,11 +24,13 @@
 """This modules defines functions for clustering and thresholding timeseries to
 produces event triggers
 """
-from __future__ import absolute_import
-import numpy, copy, os.path
+import os.path
+import copy
+import itertools
 import logging
+import pickle
+import numpy
 import h5py
-from six.moves import cPickle
 
 from pycbc.types import Array
 from pycbc.scheme import schemed
@@ -37,6 +39,8 @@ from pycbc.detector import Detector
 from . import coinc, ranking
 
 from .eventmgr_cython import findchirp_cluster_over_window_cython
+
+logger = logging.getLogger('pycbc.events.eventmgr')
 
 @schemed("pycbc.events.threshold_")
 def threshold(series, value):
@@ -145,8 +149,8 @@ def findchirp_cluster_over_window(times, values, window_length):
 
     indices = numpy.zeros(len(times), dtype=numpy.int32)
     tlen = len(times)
-    absvalues = numpy.array(abs(values), copy=False)
-    times = numpy.array(times, dtype=numpy.int32, copy=False)
+    absvalues = numpy.asarray(abs(values))
+    times = numpy.asarray(times, dtype=numpy.int32)
     k = findchirp_cluster_over_window_cython(times, absvalues, window_length,
                                              indices, tlen)
 
@@ -176,6 +180,23 @@ def cluster_reduce(idx, snr, window_size):
     return idx.take(ind), snr.take(ind)
 
 
+class H5FileSyntSugar(object):
+    """Convenience class that adds some syntactic sugar to h5py.File.
+    """
+    def __init__(self, name, prefix=''):
+        self.f = h5py.File(name, 'w')
+        self.prefix = prefix
+
+    def __setitem__(self, name, data):
+        self.f.create_dataset(
+            self.prefix + '/' + name,
+            data=data,
+            compression='gzip',
+            compression_opts=9,
+            shuffle=True
+        )
+
+
 class EventManager(object):
     def __init__(self, opt, column, column_types, **kwds):
         self.opt = opt
@@ -197,9 +218,9 @@ class EventManager(object):
         from pycbc.io.hdf import dump_state
 
         self.tnum_finished = tnum_finished
-        logging.info('Writing checkpoint file at template %s', tnum_finished)
+        logger.info('Writing checkpoint file at template %s', tnum_finished)
         fp = h5py.File(filename, 'w')
-        dump_state(self, fp, protocol=cPickle.HIGHEST_PROTOCOL)
+        dump_state(self, fp, protocol=pickle.HIGHEST_PROTOCOL)
         fp.close()
 
     @staticmethod
@@ -215,7 +236,7 @@ class EventManager(object):
             raise e
         fp.close()
         next_template = mgr.tnum_finished + 1
-        logging.info('Restoring with checkpoint at template %s', next_template)
+        logger.info('Restoring with checkpoint at template %s', next_template)
         return mgr.tnum_finished + 1, mgr
 
     @classmethod
@@ -352,35 +373,35 @@ class EventManager(object):
 
     def consolidate_events(self, opt, gwstrain=None):
         self.events = numpy.concatenate(self.accumulate)
-        logging.info("We currently have %d triggers", len(self.events))
+        logger.info("We currently have %d triggers", len(self.events))
         if opt.chisq_threshold and opt.chisq_bins:
-            logging.info("Removing triggers with poor chisq")
+            logger.info("Removing triggers with poor chisq")
             self.chisq_threshold(opt.chisq_threshold, opt.chisq_bins,
                                  opt.chisq_delta)
-            logging.info("%d remaining triggers", len(self.events))
+            logger.info("%d remaining triggers", len(self.events))
 
         if opt.newsnr_threshold and opt.chisq_bins:
-            logging.info("Removing triggers with NewSNR below threshold")
+            logger.info("Removing triggers with NewSNR below threshold")
             self.newsnr_threshold(opt.newsnr_threshold)
-            logging.info("%d remaining triggers", len(self.events))
+            logger.info("%d remaining triggers", len(self.events))
 
         if opt.keep_loudest_interval:
-            logging.info("Removing triggers not within the top %s "
-                         "loudest of a %s second interval by %s",
-                         opt.keep_loudest_num, opt.keep_loudest_interval,
-                         opt.keep_loudest_stat)
+            logger.info("Removing triggers not within the top %s "
+                        "loudest of a %s second interval by %s",
+                        opt.keep_loudest_num, opt.keep_loudest_interval,
+                        opt.keep_loudest_stat)
             self.keep_loudest_in_interval\
                 (opt.keep_loudest_interval * opt.sample_rate,
                  opt.keep_loudest_num, statname=opt.keep_loudest_stat,
                  log_chirp_width=opt.keep_loudest_log_chirp_window)
-            logging.info("%d remaining triggers", len(self.events))
+            logger.info("%d remaining triggers", len(self.events))
 
         if opt.injection_window and hasattr(gwstrain, 'injections'):
-            logging.info("Keeping triggers within %s seconds of injection",
-                         opt.injection_window)
+            logger.info("Keeping triggers within %s seconds of injection",
+                        opt.injection_window)
             self.keep_near_injection(opt.injection_window,
                                      gwstrain.injections)
-            logging.info("%d remaining triggers", len(self.events))
+            logger.info("%d remaining triggers", len(self.events))
 
         self.accumulate = [self.events]
 
@@ -406,33 +427,21 @@ class EventManager(object):
         self.write_performance = True
 
     def write_events(self, outname):
-        """ Write the found events to a sngl inspiral table
+        """Write the found events to a file. The only currently supported
+        format is HDF5, indicated by an .hdf or .h5 extension.
         """
         self.make_output_dir(outname)
-
-        if '.hdf' in outname:
+        if outname.endswith(('.hdf', '.h5')):
             self.write_to_hdf(outname)
-        else:
-            raise ValueError('Cannot write to this format')
+            return
+        raise ValueError('Unsupported event output file format')
 
     def write_to_hdf(self, outname):
-        class fw(object):
-            def __init__(self, name, prefix):
-                self.f = h5py.File(name, 'w')
-                self.prefix = prefix
-
-            def __setitem__(self, name, data):
-                col = self.prefix + '/' + name
-                self.f.create_dataset(col, data=data,
-                                      compression='gzip',
-                                      compression_opts=9,
-                                      shuffle=True)
-
         self.events.sort(order='template_id')
         th = numpy.array([p['tmplt'].template_hash for p in
                           self.template_params])
         tid = self.events['template_id']
-        f = fw(outname, self.opt.channel_name[0:2])
+        f = H5FileSyntSugar(outname, self.opt.channel_name[0:2])
 
         if len(self.events):
             f['snr'] = abs(self.events['snr'])
@@ -468,11 +477,12 @@ class EventManager(object):
                 f['sigmasq'] = template_sigmasq_plus[tid]
             except Exception:
                 # Not precessing
-                template_sigmasq = numpy.array(
-                                  [t['sigmasq'] for t in self.template_params],
-                                               dtype=numpy.float32)
-                f['sigmasq'] = template_sigmasq[tid]
+                f['sigmasq'] = self.events['sigmasq']
 
+            # Template durations should ideally be stored in the bank file.
+            # At present, however, a few plotting/visualization codes
+            # downstream in the offline search workflow rely on durations being
+            # stored in the trigger files instead.
             template_durations = [p['tmplt'].template_duration for p in
                                   self.template_params]
             f['template_duration'] = numpy.array(template_durations,
@@ -555,6 +565,8 @@ class EventManager(object):
                     f['gating/' + gate_type + '/pad'] = \
                             numpy.array([g[2] for g in gating_info[gate_type]])
 
+        f.f.close()
+
 
 class EventManagerMultiDetBase(EventManager):
     def __init__(self, opt, ifos, column, column_types, psd=None, **kwargs):
@@ -595,10 +607,36 @@ class EventManagerMultiDetBase(EventManager):
         self.template_event_dict[ifo] = self.template_events
         self.template_events = None
 
+    def write_gating_info_to_hdf(self, hf):
+        """Write per-detector gating information to an h5py file object.
+        The information is laid out according to the following groups and
+        datasets: `/<detector>/gating/{file, auto}/{time, width, pad}` where
+        "file" and "auto" indicate respectively externally-provided gates and
+        internally-generated gates (autogating), and "time", "width" and "pad"
+        indicate the gate center times, total durations and padding durations
+        in seconds respectively.
+        """
+        if 'gating_info' not in self.global_params:
+            return
+        gates = self.global_params['gating_info']
+        for ifo, gate_type in itertools.product(self.ifos, ['file', 'auto']):
+            if gate_type not in gates[ifo]:
+                continue
+            hf[f'{ifo}/gating/{gate_type}/time'] = numpy.array(
+                [float(g[0]) for g in gates[ifo][gate_type]]
+            )
+            hf[f'{ifo}/gating/{gate_type}/width'] = numpy.array(
+                [g[1] for g in gates[ifo][gate_type]]
+            )
+            hf[f'{ifo}/gating/{gate_type}/pad'] = numpy.array(
+                [g[2] for g in gates[ifo][gate_type]]
+            )
+
 
 class EventManagerCoherent(EventManagerMultiDetBase):
     def __init__(self, opt, ifos, column, column_types, network_column,
-                 network_column_types, psd=None, **kwargs):
+                 network_column_types, segments, time_slides,
+                 psd=None, **kwargs):
         super(EventManagerCoherent, self).__init__(
             opt, ifos, column, column_types, psd=None, **kwargs)
         self.network_event_dtype = \
@@ -612,27 +650,49 @@ class EventManagerCoherent(EventManagerMultiDetBase):
         for ifo in self.ifos:
             self.event_index[ifo] = 0
         self.event_index['network'] = 0
-        self.template_event_dict['network'] = \
-                                numpy.array([], dtype=self.network_event_dtype)
+        self.template_event_dict['network'] = numpy.array(
+            [], dtype=self.network_event_dtype)
+        self.segments = segments
+        self.time_slides = time_slides
 
-    def cluster_template_network_events(self, tcolumn, column, window_size):
+    def cluster_template_network_events(self, tcolumn, column, window_size,
+                                        slide=0):
         """ Cluster the internal events over the named column
+        Parameters
+        ----------------
+        tcolumn
+            Indicates which column contains the time.
+        column
+            The named column to cluster.
+        window_size
+            The size of the window.
+        slide
+            Default is 0.
         """
-        cvec = self.template_event_dict['network'][column]
-        tvec = self.template_event_dict['network'][tcolumn]
-        if window_size == 0:
-            indices = numpy.arange(len(tvec))
-        else:
+        slide_indices = (
+            self.template_event_dict['network']['slide_id'] == slide)
+        cvec = self.template_event_dict['network'][column][slide_indices]
+        tvec = self.template_event_dict['network'][tcolumn][slide_indices]
+        if not window_size == 0:
+            # cluster events over the window
             indices = findchirp_cluster_over_window(tvec, cvec, window_size)
-        for key in self.template_event_dict:
-            self.template_event_dict[key] = numpy.take(
-                self.template_event_dict[key], indices)
+            # if a slide_indices = 0
+            if any(~slide_indices):
+                indices = numpy.concatenate((
+                        numpy.flatnonzero(~slide_indices),
+                        numpy.flatnonzero(slide_indices)[indices]))
+                indices.sort()
+            # get value of key for where you have indicies
+            for key in self.template_event_dict:
+                self.template_event_dict[key] = \
+                    self.template_event_dict[key][indices]
+        else:
+            indices = numpy.arange(len(tvec))
 
     def add_template_network_events(self, columns, vectors):
         """ Add a vector indexed """
         # initialize with zeros - since vectors can be None, look for the
         # longest one that isn't
-        new_events = None
         new_events = numpy.zeros(
             max([len(v) for v in vectors if v is not None]),
             dtype=self.network_event_dtype
@@ -657,39 +717,31 @@ class EventManagerCoherent(EventManagerMultiDetBase):
         self.template_events = None
 
     def write_to_hdf(self, outname):
-        class fw(object):
-            def __init__(self, name):
-                self.f = h5py.File(name, 'w')
-
-            def __setitem__(self, name, data):
-                col = self.prefix + '/' + name
-                self.f.create_dataset(col, data=data,
-                                      compression='gzip',
-                                      compression_opts=9,
-                                      shuffle=True)
-
         self.events.sort(order='template_id')
-        th = numpy.array([p['tmplt'].template_hash for p in
-                          self.template_params])
-        f = fw(outname)
+        th = numpy.array(
+            [p['tmplt'].template_hash for p in self.template_params])
+        f = H5FileSyntSugar(outname)
+        self.write_gating_info_to_hdf(f)
         # Output network stuff
         f.prefix = 'network'
-        network_events = numpy.array([e for e in self.network_events],
-                                     dtype=self.network_event_dtype)
-        f['event_id'] = network_events['event_id']
-        f['coherent_snr'] = network_events['coherent_snr']
-        f['reweighted_snr'] = network_events['reweighted_snr']
-        f['null_snr'] = network_events['null_snr']
-        f['end_time_gc'] = network_events['time_index'] / \
-                float(self.opt.sample_rate[self.ifos[0].lower()]) + \
-                        self.opt.gps_start_time[self.ifos[0].lower()]
-        f['nifo'] = network_events['nifo']
-        f['latitude'] = network_events['latitude']
-        f['longitude'] = network_events['longitude']
-        f['template_id'] = network_events['template_id']
-        for ifo in self.ifos:
-            # First add the ifo event ids to the network branch
-            f[ifo + '_event_id'] = network_events[ifo + '_event_id']
+        network_events = numpy.array(
+            [e for e in self.network_events], dtype=self.network_event_dtype)
+        for col in network_events.dtype.names:
+            if col == 'time_index':
+                f['end_time_gc'] = (
+                    network_events[col]
+                    / float(self.opt.sample_rate[self.ifos[0].lower()])
+                    + self.opt.gps_start_time[self.ifos[0].lower()]
+                    )
+            else:
+                f[col] = network_events[col]
+        starts = []
+        ends = []
+        for seg in self.segments[self.ifos[0]]:
+            starts.append(seg.start_time.gpsSeconds)
+            ends.append(seg.end_time.gpsSeconds)
+        f['search/segments/start_times'] = starts
+        f['search/segments/end_times'] = ends
         # Individual ifo stuff
         for i, ifo in enumerate(self.ifos):
             tid = self.events['template_id'][self.events['ifo'] == i]
@@ -697,8 +749,7 @@ class EventManagerCoherent(EventManagerMultiDetBase):
             ifo_events = numpy.array([e for e in self.events
                     if e['ifo'] == self.ifo_dict[ifo]], dtype=self.event_dtype)
             if len(ifo_events):
-                ifo_str = ifo.lower()[0] if ifo != 'H1' else ifo.lower()
-                f['snr_%s' % ifo_str] = abs(ifo_events['snr'])
+                f['snr'] = abs(ifo_events['snr'])
                 f['event_id'] = ifo_events['event_id']
                 try:
                     # Precessing
@@ -710,11 +761,13 @@ class EventManagerCoherent(EventManagerMultiDetBase):
                 f['chisq'] = ifo_events['chisq']
                 f['bank_chisq'] = ifo_events['bank_chisq']
                 f['bank_chisq_dof'] = ifo_events['bank_chisq_dof']
-                f['cont_chisq'] = ifo_events['cont_chisq']
+                f['auto_chisq'] = ifo_events['auto_chisq']
+                f['auto_chisq_dof'] = ifo_events['auto_chisq_dof']
                 f['end_time'] = ifo_events['time_index'] / \
-                        float(self.opt.sample_rate[ifo_str]) + \
-                        self.opt.gps_start_time[ifo_str]
+                        float(self.opt.sample_rate[ifo]) + \
+                        self.opt.gps_start_time[ifo]
                 f['time_index'] = ifo_events['time_index']
+                f['slide_id'] = ifo_events['slide_id']
                 try:
                     # Precessing
                     template_sigmasq_plus = numpy.array(
@@ -739,11 +792,6 @@ class EventManagerCoherent(EventManagerMultiDetBase):
                                                    dtype=numpy.float32)
                     f['sigmasq'] = template_sigmasq[tid]
 
-                template_durations = [p['tmplt'].template_duration for p in
-                                      self.template_params]
-                f['template_duration'] = numpy.array(template_durations,
-                                                     dtype=numpy.float32)[tid]
-
                 # FIXME: Can we get this value from the autochisq instance?
                 # cont_dof = self.opt.autochi_number_points
                 # if self.opt.autochi_onesided is None:
@@ -760,7 +808,7 @@ class EventManagerCoherent(EventManagerMultiDetBase):
                     f['chisq_dof'] = numpy.zeros(len(ifo_events))
 
                 f['template_hash'] = th[tid]
-
+            f['search/time_slides'] = numpy.array(self.time_slides[ifo])
             if self.opt.trig_start_time:
                 f['search/start_time'] = numpy.array([
                              self.opt.trig_start_time[ifo]], dtype=numpy.int32)
@@ -794,17 +842,6 @@ class EventManagerCoherent(EventManagerMultiDetBase):
                     numpy.array([filters_per_core / float(self.run_time)])
                 f['search/setup_time_fraction'] = \
                    numpy.array([float(self.setup_time) / float(self.run_time)])
-
-            if 'gating_info' in self.global_params:
-                gating_info = self.global_params['gating_info']
-                for gate_type in ['file', 'auto']:
-                    if gate_type in gating_info:
-                        f['gating/' + gate_type + '/time'] = numpy.array(
-                                 [float(g[0]) for g in gating_info[gate_type]])
-                        f['gating/' + gate_type + '/width'] = numpy.array(
-                                        [g[1] for g in gating_info[gate_type]])
-                        f['gating/' + gate_type + '/pad'] = numpy.array(
-                                        [g[2] for g in gating_info[gate_type]])
 
     def finalize_template_events(self):
         # Check that none of the template events have the same time index as an
@@ -940,41 +977,20 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
             self.template_event_dict[ifo] = numpy.array([],
                                                         dtype=self.event_dtype)
 
-    def write_events(self, outname):
-        """ Write the found events to a sngl inspiral table
-        """
-        self.make_output_dir(outname)
-
-        if '.hdf' in outname:
-            self.write_to_hdf(outname)
-        else:
-            raise ValueError('Cannot write to this format')
-
     def write_to_hdf(self, outname):
-        class fw(object):
-            def __init__(self, name):
-                self.f = h5py.File(name, 'w')
-
-            def __setitem__(self, name, data):
-                col = self.prefix + '/' + name
-                self.f.create_dataset(col, data=data,
-                                      compression='gzip',
-                                      compression_opts=9,
-                                      shuffle=True)
-
         self.events.sort(order='template_id')
         th = numpy.array([p['tmplt'].template_hash for p in
                                                          self.template_params])
         tid = self.events['template_id']
-        f = fw(outname)
+        f = H5FileSyntSugar(outname)
+        self.write_gating_info_to_hdf(f)
         for ifo in self.ifos:
             f.prefix = ifo
             ifo_events = numpy.array([e for e in self.events if
                                       e['ifo'] == self.ifo_dict[ifo]],
                                      dtype=self.event_dtype)
             if len(ifo_events):
-                ifo_str = ifo.lower()[0] if ifo != 'H1' else ifo.lower()
-                f['snr_%s' % ifo_str] = abs(ifo_events['snr'])
+                f['snr'] = abs(ifo_events['snr'])
                 try:
                     # Precessing
                     f['u_vals'] = ifo_events['u_vals']
@@ -987,8 +1003,8 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
                 f['bank_chisq_dof'] = ifo_events['bank_chisq_dof']
                 f['cont_chisq'] = ifo_events['cont_chisq']
                 f['end_time'] = ifo_events['time_index'] / \
-                        float(self.opt.sample_rate[ifo_str]) + \
-                          self.opt.gps_start_time[ifo_str]
+                        float(self.opt.sample_rate[ifo]) + \
+                          self.opt.gps_start_time[ifo]
                 try:
                     # Precessing
                     template_sigmasq_plus = numpy.array([t['sigmasq_plus'] for
@@ -1008,11 +1024,6 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
                                                     self.template_params],
                                                    dtype=numpy.float32)
                     f['sigmasq'] = template_sigmasq[tid]
-
-                template_durations = [p['tmplt'].template_duration for p in
-                                      self.template_params]
-                f['template_duration'] = \
-                      numpy.array(template_durations, dtype=numpy.float32)[tid]
 
                 # FIXME: Can we get this value from the autochisq instance?
                 cont_dof = self.opt.autochi_number_points
@@ -1067,17 +1078,6 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
                     numpy.array([filters_per_core / float(self.run_time)])
                 f['search/setup_time_fraction'] = \
                    numpy.array([float(self.setup_time) / float(self.run_time)])
-
-            if 'gating_info' in self.global_params:
-                gating_info = self.global_params['gating_info']
-                for gate_type in ['file', 'auto']:
-                    if gate_type in gating_info:
-                        f['gating/' + gate_type + '/time'] = numpy.array(
-                                 [float(g[0]) for g in gating_info[gate_type]])
-                        f['gating/' + gate_type + '/width'] = numpy.array(
-                                        [g[1] for g in gating_info[gate_type]])
-                        f['gating/' + gate_type + '/pad'] = numpy.array(
-                                        [g[2] for g in gating_info[gate_type]])
 
 
 __all__ = ['threshold_and_cluster', 'findchirp_cluster_over_window',

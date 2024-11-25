@@ -16,21 +16,23 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import argparse
-import h5py
 import numpy
 import sys
+import logging
 import matplotlib as mpl; mpl.use('Agg')
 import pylab
-import pycbc.results
-import pycbc.version
-from pycbc import conversions
+
 from scipy.stats import norm, poisson
+
+import pycbc.results
+from pycbc import conversions
+from pycbc import init_logging, add_common_pycbc_options
+from pycbc.io.hdf import HFile
 
 parser = argparse.ArgumentParser(usage='pycbc_ifar_catalog [--options]',
                     description='Plots cumulative IFAR vs count for'
-                          ' coincident foreground triggers')
-parser.add_argument('--version', action='version',
-                    version=pycbc.version.git_verbose_msg)
+                          ' foreground triggers')
+add_common_pycbc_options(parser)
 parser.add_argument('--trigger-files', nargs='+',
                     help='Path to coincident trigger HDF file(s)')
 parser.add_argument('--output-file', required=True,
@@ -65,11 +67,13 @@ parser.add_argument('--use-exclusive-ifar', action='store_true',
                          'IFAR calculations. Default=False.')
 opts = parser.parse_args()
 
+init_logging(opts.verbose)
+
 if opts.use_tex:
     pylab.rc('text', usetex=True)
     pylab.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 
-trigf = [h5py.File(f, 'r') for f in opts.trigger_files]
+trigf = [HFile(f, 'r') for f in opts.trigger_files]
 
 # Parse which inclusive background to use for the plotting
 h_inc_back_num = opts.use_hierarchical_level
@@ -86,12 +90,11 @@ except KeyError:
     h_iterations = 0
 
 if h_inc_back_num is None:
-    print('Using {} hierarchical removal iterations'.format(h_iterations))
+    logging.info('Using %d hierarchical removal iterations', h_iterations)
     h_inc_back_num = h_iterations
 
 if h_inc_back_num > h_iterations:
     # Produce a null plot saying no hierarchical removals can be plotted
-    import sys
     fig = pylab.figure()
     ax = fig.add_subplot(111)
 
@@ -249,7 +252,7 @@ pylab.xlabel(ifar_label, size='large')
 
 # save
 caption = 'This is a cumulative histogram of triggers. The blue triangles ' \
-          + 'represent coincident foreground triggers. The dashed line ' \
+          + 'represent foreground triggers. The dashed line ' \
           + 'represents the expected background given the analysis time. ' \
           + 'The shaded regions represent counting errors.'
 pycbc.results.save_fig_with_metadata(fig, opts.output_file,

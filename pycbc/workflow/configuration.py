@@ -28,173 +28,72 @@ https://ldas-jobs.ligo.caltech.edu/~cbc/docs/pycbc/ahope/initialization_inifile.
 """
 
 import os
-import re
+import logging
 import stat
-import string
 import shutil
-import time
-import requests
-import distutils.spawn
-import six
+import subprocess
+from shutil import which
+import urllib.parse
+from urllib.parse import urlparse
+import hashlib
+
 from pycbc.types.config import InterpolatingConfigParser
-from six.moves.urllib.parse import urlparse
-from six.moves import http_cookiejar as cookielib
-from six.moves.http_cookiejar import (
-    _warn_unhandled_exception,
-    LoadError,
-    Cookie,
-)
-from bs4 import BeautifulSoup
+
+logger = logging.getLogger('pycbc.workflow.configuration')
+
+# NOTE urllib is weird. For some reason it only allows known schemes and will
+# give *wrong* results, rather then failing, if you use something like gsiftp
+# We can add schemes explicitly, as below, but be careful with this!
+urllib.parse.uses_relative.append('osdf')
+urllib.parse.uses_netloc.append('osdf')
 
 
-def _really_load(self, f, filename, ignore_discard, ignore_expires):
+def hash_compare(filename_1, filename_2, chunk_size=None, max_chunks=None):
     """
-    This function is required to monkey patch MozillaCookieJar's _really_load
-    function which does not understand the curl format cookie file created
-    by ecp-cookie-init. It patches the code so that #HttpOnly_ get loaded.
+    Calculate the sha1 hash of a file, or of part of a file
 
-    https://bugs.python.org/issue2190
-    https://bugs.python.org/file37625/httponly.patch
+    Parameters
+    ----------
+    filename_1 : string or path
+        the first file to be hashed / compared
+    filename_2 : string or path
+        the second file to be hashed / compared
+    chunk_size : integer
+        This size of chunks to be read in and hashed. If not given, will read
+        the whole file (may be slow for large files).
+    max_chunks: integer
+        This many chunks to be compared. If all chunks so far have been the
+        same, then just assume its the same file. Default 10
+
+    Returns
+    -------
+    hash : string
+        The hexdigest() after a sha1 hash of (part of) the file
     """
-    now = time.time()
 
-    magic = f.readline()
-    if not re.search(self.magic_re, magic):
-        f.close()
-        raise LoadError(
-            "%r does not look like a Netscape format cookies file" % filename
-        )
+    if max_chunks is None and chunk_size is not None:
+        max_chunks = 10
+    elif chunk_size is None:
+        max_chunks = 1
 
-    try:
-        while 1:
-            line = f.readline()
-            if line == "":
-                break
-
-            # last field may be absent, so keep any trailing tab
-            if line.endswith("\n"):
-                line = line[:-1]
-
-            sline = line.strip()
-            # support HttpOnly cookies (as stored by curl or old Firefox).
-            if sline.startswith("#HttpOnly_"):
-                line = sline[10:]
-            # skip comments and blank lines ... what is $ for?
-            elif sline.startswith(("#", "$")) or sline == "":
-                continue
-
-            (
-                domain,
-                domain_specified,
-                path,
-                secure,
-                expires,
-                name,
-                value,
-            ) = line.split("\t")
-            secure = secure == "TRUE"
-            domain_specified = domain_specified == "TRUE"
-            if name == "":
-                # cookies.txt regards 'Set-Cookie: foo' as a cookie
-                # with no name, whereas cookielib regards it as a
-                # cookie with no value.
-                name = value
-                value = None
-
-            initial_dot = domain.startswith(".")
-            assert domain_specified == initial_dot
-
-            discard = False
-            if expires == "":
-                expires = None
-                discard = True
-
-            # assume path_specified is false
-            c = Cookie(
-                0,
-                name,
-                value,
-                None,
-                False,
-                domain,
-                domain_specified,
-                initial_dot,
-                path,
-                False,
-                secure,
-                expires,
-                discard,
-                None,
-                None,
-                {},
-            )
-            if not ignore_discard and c.discard:
-                continue
-            if not ignore_expires and c.is_expired(now):
-                continue
-            self.set_cookie(c)
-
-    except IOError:
-        raise
-    except Exception:
-        _warn_unhandled_exception()
-        raise LoadError(
-            "invalid Netscape format cookies file %r: %r" % (filename, line)
-        )
+    with open(filename_1, 'rb') as f1:
+        with open(filename_2, 'rb') as f2:
+            for _ in range(max_chunks):
+                h1 = hashlib.sha1(f1.read(chunk_size)).hexdigest()
+                h2 = hashlib.sha1(f2.read(chunk_size)).hexdigest()
+                if h1 != h2:
+                    return False
+    return True
 
 
-# Now monkey patch the code
-cookielib.MozillaCookieJar._really_load = _really_load  # noqa
-
-ecp_cookie_error = """The attempt to download the file at
-
-{}
-
-was redirected to the git.ligo.org sign-in page. This means that you likely
-forgot to initialize your ECP cookie or that your LIGO.ORG credentials are
-otherwise invalid. Create a valid ECP cookie for git.ligo.org by running
-
-ecp-cookie-init LIGO.ORG https://git.ligo.org/users/auth/shibboleth/callback albert.einstein
-
-before attempting to download files from git.ligo.org.
-"""
-
-
-def istext(s, text_characters=None, threshold=0.3):
-    """
-    Determines if the string is a set of binary data or a text file.
-    This is done by checking if a large proportion of characters are > 0X7E
-    (0x7F is <DEL> and unprintable) or low bit control codes. In other words
-    things that you wouldn't see (often) in a text file. (ASCII past 0x7F
-    might appear, but rarely).
-
-    Code modified from
-    https://www.safaribooksonline.com/library/view/python-cookbook-2nd/0596007973/ch01s12.html
-    """
-    # if s contains any null, it's not text:
-    if six.PY2 and "\0" in s:
-        return False
-    # an "empty" string is "text" (arbitrary but reasonable choice):
-    if not s:
-        return True
-
-    text_characters = "".join(map(chr, range(32, 127))) + "\n\r\t\b"
-    if six.PY2:
-        _null_trans = string.maketrans("", "")
-        # Get the substring of s made up of non-text characters
-        t = s.translate(_null_trans, text_characters)
-    else:
-        # Not yet sure how to deal with this in python3. Will need example.
-        return True
-
-        # trans = str.maketrans('', '', text_characters)
-        # t = s.translate(trans)
-
-    # s is 'text' if less than 30% of its characters are non-text ones:
-    return len(t) / float(len(s)) <= threshold
-
-
-def resolve_url(url, directory=None, permissions=None, copy_to_cwd=True):
+def resolve_url(
+    url,
+    directory=None,
+    permissions=None,
+    copy_to_cwd=True,
+    hash_max_chunks=None,
+    hash_chunk_size=None,
+):
     """Resolves a URL to a local file, and returns the path to that file.
 
     If a URL is given, the file will be copied to the current working
@@ -225,68 +124,59 @@ def resolve_url(url, directory=None, permissions=None, copy_to_cwd=True):
         elif copy_to_cwd:
             if os.path.isfile(filename):
                 # check to see if src and dest are the same file
-                src_inode = os.stat(u.path)[stat.ST_INO]
-                dst_inode = os.stat(filename)[stat.ST_INO]
-                if src_inode != dst_inode:
+                same_file = hash_compare(
+                    u.path,
+                    filename,
+                    chunk_size=hash_chunk_size,
+                    max_chunks=hash_max_chunks
+                )
+                if not same_file:
                     shutil.copy(u.path, filename)
             else:
                 shutil.copy(u.path, filename)
 
     elif u.scheme == "http" or u.scheme == "https":
-        s = requests.Session()
-        s.mount(
-            str(u.scheme) + "://", requests.adapters.HTTPAdapter(max_retries=5)
-        )
-
-        # look for an ecp cookie file and load the cookies
-        cookie_dict = {}
-        ecp_file = "/tmp/ecpcookie.u%d" % os.getuid()
-        if os.path.isfile(ecp_file):
-            cj = cookielib.MozillaCookieJar()
-            cj.load(ecp_file, ignore_discard=True, ignore_expires=True)
-        else:
-            cj = []
-
-        for c in cj:
-            if c.domain == u.netloc:
-                # load cookies for this server
-                cookie_dict[c.name] = c.value
-            elif (
-                u.netloc == "code.pycbc.phy.syr.edu"
-                and c.domain == "git.ligo.org"
-            ):
-                # handle the redirect for code.pycbc to git.ligo.org
-                cookie_dict[c.name] = c.value
-
-        r = s.get(url, cookies=cookie_dict, allow_redirects=True)
-        if r.status_code != 200:
-            errmsg = "Unable to download %s\nError code = %d" % (
-                url,
-                r.status_code,
-            )
-            raise ValueError(errmsg)
-
-        # if we are downloading from git.ligo.org, check that we
-        # did not get redirected to the sign-in page
-        if u.netloc == "git.ligo.org" or u.netloc == "code.pycbc.phy.syr.edu":
-            # Check if we have downloaded a binary file.
-            if istext(r.content):
-                soup = BeautifulSoup(r.content, "html.parser")
-                desc = soup.findAll(attrs={"property": "og:url"})
-                if (
-                    len(desc)
-                    and desc[0]["content"]
-                    == "https://git.ligo.org/users/sign_in"
-                ):
-                    raise ValueError(ecp_cookie_error.format(url))
+        # Would like to move ciecplib import to top using import_optional, but
+        # it needs to be available when documentation runs in the CI, and I
+        # can't get it to install in the GitHub CI
+        import ciecplib
+        # Make the scitokens logger a little quieter
+        # (it is called through ciecpclib)
+        curr_level = logging.getLogger().level
+        logging.getLogger('scitokens').setLevel(curr_level + 10)
+        with ciecplib.Session() as s:
+            if u.netloc in ("git.ligo.org", "code.pycbc.phy.syr.edu"):
+                # authenticate with git.ligo.org using callback
+                s.get("https://git.ligo.org/users/auth/shibboleth/callback")
+            r = s.get(url, allow_redirects=True)
+            r.raise_for_status()
 
         output_fp = open(filename, "wb")
         output_fp.write(r.content)
         output_fp.close()
 
+    elif u.scheme == "osdf":
+        # OSDF will require a scitoken to be present and stashcp to be
+        # available. Thanks Dunky for the code here!
+        cmd = [
+            which("stashcp") or "stashcp",
+            u.path,
+            filename,
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as err:
+            # Print information about the failure
+            print(err.cmd, "failed with")
+            print(err.stderr.decode())
+            print(err.stdout.decode())
+            raise
+
+        return filename
+
     else:
-        # TODO: We could support other schemes such as gsiftp by
-        # calling out to globus-url-copy
+        # TODO: We could support other schemes as needed
         errmsg = "Unknown URL scheme: %s\n" % (u.scheme)
         errmsg += "Currently supported are: file, http, and https."
         raise ValueError(errmsg)
@@ -446,12 +336,12 @@ class WorkflowConfigParser(InterpolatingConfigParser):
         # expand executable which statements
         self.perform_exe_expansion()
 
-        # Check for any substitutions that can be made
-        self.perform_extended_interpolation()
-
         # Resolve any URLs needing resolving
         self.curr_resolved_files = {}
         self.resolve_urls()
+
+        # Check for any substitutions that can be made
+        self.perform_extended_interpolation()
 
     def perform_exe_expansion(self):
         """
@@ -513,7 +403,7 @@ class WorkflowConfigParser(InterpolatingConfigParser):
         # Maybe we can add a few different possibilities for substitution
         if len(testList) == 2:
             if testList[0] == "which":
-                newString = distutils.spawn.find_executable(testList[1])
+                newString = which(testList[1])
                 if not newString:
                     errmsg = "Cannot find exe %s in your path " % (testList[1])
                     errmsg += "and you specified ${which:%s}." % (testList[1])
@@ -604,7 +494,9 @@ class WorkflowConfigParser(InterpolatingConfigParser):
         for section in self.sections():
             for option, value in self.items(section):
                 # Check the value
-                new_str = self.resolve_file_url(value)
+                value_l = value.split(' ')
+                new_str_l = [self.resolve_file_url(val) for val in value_l]
+                new_str = ' '.join(new_str_l)
                 if new_str is not None and new_str != value:
                     self.set(section, option, new_str)
 
@@ -639,9 +531,9 @@ class WorkflowConfigParser(InterpolatingConfigParser):
         # ${ ... } form I may not have to do anything
 
         # Strip the ${ and }
-        test_string = test_string[2:-1]
+        test_string_strip = test_string[2:-1]
 
-        test_list = test_string.split(":", 1)
+        test_list = test_string_strip.split(":", 1)
 
         if len(test_list) == 2:
             if test_list[0] == "resolve":
@@ -652,4 +544,4 @@ class WorkflowConfigParser(InterpolatingConfigParser):
                 self.curr_resolved_files[curr_lfn] = local_url
                 return local_url
 
-        return None
+        return test_string

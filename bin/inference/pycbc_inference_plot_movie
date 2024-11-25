@@ -43,7 +43,7 @@ import logging
 import subprocess
 import os
 import glob
-from multiprocessing import Pool
+from pycbc.pool import BroadcastPool as Pool
 
 import numpy
 
@@ -53,7 +53,6 @@ from matplotlib import pyplot
 
 import pycbc.results
 from pycbc import conversions
-from pycbc import __version__
 from pycbc.inference import (option_utils, io)
 
 from pycbc.results.scatter_histograms import (create_multidim_plot,
@@ -110,8 +109,7 @@ def integer_logspace(start, end, num):
 # the frame number/step options
 skip_args = ['thin-start', 'thin-interval', 'thin-end', 'iteration']
 parser = io.ResultsArgumentParser(description=__doc__, skip_args=skip_args)
-parser.add_argument("--version", action="version", version=__version__,
-                    help="show version number and exit")
+pycbc.add_common_pycbc_options(parser)
 # make frame number and frame step mutually exclusive
 group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument("--frame-number", type=int,
@@ -135,7 +133,6 @@ parser.add_argument("--log-steps", action="store_true", default=False,
 parser.add_argument("--output-prefix", type=str, required=True,
                     help="Output path and prefix for the frame files "
                          "(without extension).")
-parser.add_argument('--verbose', action='store_true')
 parser.add_argument('--dpi', type=int, default=200,
                     help='Set the dpi for each frame; default is 200')
 parser.add_argument("--nprocesses", type=int, default=None,
@@ -262,7 +259,7 @@ if opts.plot_injection_parameters:
             vals = injections[p]
         except NameError:
             # injection doesn't have this parameter, skip
-            logging.warn("Could not find injection parameter {}".format(p))
+            logging.warning("Could not find injection parameter %s", p)
             continue
         unique_vals = numpy.unique(vals)
         if unique_vals.size != 1:
