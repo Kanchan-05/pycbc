@@ -32,7 +32,7 @@ requires = []
 setup_requires = ['numpy>=1.16.0']
 install_requires = setup_requires + [
     'cython>=0.29',
-    'numpy>=1.16.0,!=1.19.0',
+    'numpy>=1.16.0,!=1.19.0,!=2.2.2',
     'scipy>=0.16.0',
     'astropy>=2.0.3,!=4.2.1,!=4.0.5',
     'matplotlib>=1.5.1',
@@ -47,7 +47,7 @@ install_requires = setup_requires + [
     'gwdatafind',
     'pegasus-wms.api >= 5.0.8',
     'python-ligo-lw >= 1.7.0',
-    'ligo-segments',
+    'igwn-segments',
     'lalsuite!=7.2',
     'lscsoft-glue>=1.59.3',
     'pykerr',
