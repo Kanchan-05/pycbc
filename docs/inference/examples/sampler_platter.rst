@@ -27,13 +27,6 @@ configurations which can analyze this simple problem.
 .. literalinclude:: ../../../examples/inference/samplers/emcee_stub.ini
    :language: ini
    
-======================================================================
-`Parallel-tempered Emcee <https://emcee.readthedocs.io/en/v2.2.1/>`_
-======================================================================
-   
-.. literalinclude:: ../../../examples/inference/samplers/emcee_pt_stub.ini
-   :language: ini
-   
 ===================================================
 `PTEmcee <https://github.com/willvousden/ptemcee>`_
 ===================================================
@@ -46,6 +39,13 @@ configurations which can analyze this simple problem.
 ===============================================
    
 .. literalinclude:: ../../../examples/inference/samplers/dynesty_stub.ini
+   :language: ini
+   
+==============================================================
+`Nautilus <https://nautilus-sampler.readthedocs.io/>`_
+==============================================================
+   
+.. literalinclude:: ../../../examples/inference/samplers/nautilus_stub.ini
    :language: ini
    
 ============================================================
