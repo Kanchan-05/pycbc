@@ -13,6 +13,9 @@ I use a similar naming convention here, with minor simplifications to the
 twiddle factors.
 """
 
+# Cooley-Tukey notation (N = N1 * N2, as in the reference above).
+# ruff: noqa: N803, N806
+
 import ctypes
 import logging
 
@@ -23,7 +26,7 @@ from pycbc.libutils import get_ctypes_library
 
 from .fftw_pruned_cython import second_phase_cython
 
-logger = logging.getLogger("pycbc.events.fftw_pruned")
+logger = logging.getLogger(__name__)
 
 warn_msg = (
     "The FFTW_pruned module can be used to speed up computing SNR "

@@ -35,7 +35,7 @@ import numpy as np
 from pycbc import conversions as conv
 from pycbc.events import trigger_fits as trstats
 
-logger = logging.getLogger("pycbc.events.significance")
+logger = logging.getLogger(__name__)
 
 
 def count_n_louder(bstat, fstat, dec, **kwargs):  # pylint:disable=unused-argument
@@ -204,7 +204,7 @@ def get_n_louder(
     # than floats in an argsort.
     nanmask = np.isnan(back_stat)
     if any(nanmask):
-        logging.warning(
+        logger.warning(
             "Setting %d NaN background statistic values to inf",
             nanmask.sum(),
         )
@@ -349,10 +349,10 @@ def check_significance_options(args, parser):
             try:
                 combo, value = tuple(combo_value.split(":"))
             except ValueError:
-                parser.error("Need combo:value format, got %s" % combo_value)
+                parser.error(f"Need combo:value format, got {combo_value}")
 
             if combo in combo_list:
-                parser.error("Duplicate combo %s in a significance option" % combo)
+                parser.error(f"Duplicate combo {combo} in a significance option")
             combo_list.append(combo)
 
             try:

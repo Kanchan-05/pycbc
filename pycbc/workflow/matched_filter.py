@@ -31,14 +31,14 @@ https://ldas-jobs.ligo.caltech.edu/~cbc/docs/pycbc/NOTYETCREATED.html
 import logging
 import os
 
-from pycbc.workflow.core import FileList, make_analysis_dir
+from pycbc.workflow.core import FileList
 from pycbc.workflow.jobsetup import (
     multi_ifo_coherent_job_setup,
     select_matchedfilter_class,
     sngl_ifo_job_setup,
 )
 
-logger = logging.getLogger("pycbc.workflow.matched_filter")
+logger = logging.getLogger(__name__)
 
 
 def setup_matchedfltr_workflow(
@@ -93,16 +93,15 @@ def setup_matchedfltr_workflow(
     if tags is None:
         tags = []
     logger.info("Entering matched-filtering setup module.")
-    make_analysis_dir(output_dir)
     cp = workflow.cp
 
     # Parse for options in .ini file
-    mfltrMethod = cp.get_opt_tags(
+    mfltr_method = cp.get_opt_tags(
         "workflow-matchedfilter", "matchedfilter-method", tags
     )
 
     # Could have a number of choices here
-    if mfltrMethod == "WORKFLOW_INDEPENDENT_IFOS":
+    if mfltr_method == "WORKFLOW_INDEPENDENT_IFOS":
         logger.info("Adding matched-filter jobs to workflow.")
         inspiral_outs = setup_matchedfltr_dax_generated(
             workflow,
@@ -113,7 +112,7 @@ def setup_matchedfltr_workflow(
             injection_file=injection_file,
             tags=tags,
         )
-    elif mfltrMethod == "WORKFLOW_MULTIPLE_IFOS":
+    elif mfltr_method == "WORKFLOW_MULTIPLE_IFOS":
         logger.info("Adding matched-filter jobs to workflow.")
         inspiral_outs = setup_matchedfltr_dax_generated_multi(
             workflow,
@@ -125,9 +124,9 @@ def setup_matchedfltr_workflow(
             tags=tags,
         )
     else:
-        errMsg = "Matched filter method not recognized. Must be one of "
-        errMsg += "WORKFLOW_INDEPENDENT_IFOS or WORKFLOW_MULTIPLE_IFOS."
-        raise ValueError(errMsg)
+        err_msg = "Matched filter method not recognized. Must be one of "
+        err_msg += "WORKFLOW_INDEPENDENT_IFOS or WORKFLOW_MULTIPLE_IFOS."
+        raise ValueError(err_msg)
 
     logger.info("Leaving matched-filtering setup module.")
     return inspiral_outs

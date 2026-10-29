@@ -21,6 +21,8 @@ from numpy import cos, sin
 from pycbc.coordinates.space import TIME_OFFSET_20_DEGREES
 from pycbc.types import TimeSeries
 
+logger = logging.getLogger(__name__)
+
 
 def get_available_space_detectors():
     """List the available space detectors"""
@@ -145,9 +147,10 @@ def check_signal_times(
 
     # make sure signal lies within orbit length
     if hp.duration + hp.start_time > orbit_end_time:
-        logging.warning(
-            "Time of signal end is greater than end of orbital "
-            f"data. Cutting signal at {orbit_end_time}."
+        logger.warning(
+            "Time of signal end is greater than end of orbital data. Cutting signal "
+            "at %s.",
+            orbit_end_time,
         )
         # cut off data succeeding orbit end time
         end_idx = numpy.argwhere(hp.sample_times.numpy() <= orbit_end_time)[-1][0]
@@ -155,9 +158,10 @@ def check_signal_times(
         hc = hc[:end_idx]
 
     if hp.start_time < orbit_start_time:
-        logging.warning(
-            "Time of signal start is less than start of orbital "
-            f"data. Cutting signal at {orbit_start_time}."
+        logger.warning(
+            "Time of signal start is less than start of orbital data. Cutting "
+            "signal at %s.",
+            orbit_start_time,
         )
         # cut off data preceding orbit start time
         start_idx = numpy.argwhere(hp.sample_times.numpy() >= orbit_start_time)[0][0]
@@ -257,7 +261,7 @@ class AbsSpaceDet(ABC):
         return
 
 
-class _LDC_detector(AbsSpaceDet):
+class _LDCDetector(AbsSpaceDet):
     """
     LISA detector modeled using LDC software. Constellation orbits are
     generated using LISA Orbits (https://pypi.org/project/lisaorbits/).
@@ -604,9 +608,9 @@ class _LDC_detector(AbsSpaceDet):
 
         # set TDI generation
         if tdi == 1.5:
-            X, Y, Z = michelson.X1, michelson.Y1, michelson.Z1
+            X, Y, Z = michelson.X1, michelson.Y1, michelson.Z1  # noqa: N806
         elif tdi == 2:
-            X, Y, Z = michelson.X2, michelson.Y2, michelson.Z2
+            X, Y, Z = michelson.X2, michelson.Y2, michelson.Z2  # noqa: N806
         else:
             raise ValueError(
                 "Unrecognized TDI generation input. " + "Please input either 1 or 2."
@@ -658,7 +662,7 @@ class _LDC_detector(AbsSpaceDet):
         return tdi_dict
 
 
-class _FLR_detector(AbsSpaceDet):
+class _FLRDetector(AbsSpaceDet):
     """
     LISA detector modeled using FastLISAResponse. Constellation orbits are
     generated using LISA Analysis Tools (10.5281/zenodo.10930979). Link
@@ -705,10 +709,10 @@ class _FLR_detector(AbsSpaceDet):
         use_gpu=False,
         **kwargs,
     ):
-        logging.warning(
-            "WARNING: FastLISAResponse TDI implementation is a ",
-            "work in progress. Currently unable to reproduce LDC ",
-            "or BBHx waveforms.",
+        logger.warning(
+            "WARNING: FastLISAResponse TDI implementation is a "
+            "work in progress. Currently unable to reproduce LDC "
+            "or BBHx waveforms."
         )
         self.use_gpu = use_gpu
         super().__init__(detector_name, reference_time, **kwargs)
@@ -1009,8 +1013,8 @@ class _FLR_detector(AbsSpaceDet):
 
 _backends = {
     "LISA": {
-        "LDC": _LDC_detector,
-        "FLR": _FLR_detector,
+        "LDC": _LDCDetector,
+        "FLR": _FLRDetector,
     },
 }
 

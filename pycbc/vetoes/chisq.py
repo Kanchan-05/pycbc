@@ -42,6 +42,8 @@ from pycbc.types import (
     zeros,
 )
 
+logger = logging.getLogger(__name__)
+
 BACKEND_PREFIX = "pycbc.vetoes.chisq_"
 
 
@@ -389,6 +391,32 @@ class SingleDetPowerChisq:
         safe_dict.update(pycbc.pnutils.__dict__)
         return eval(arg, {"__builtins__": None}, safe_dict)
 
+    @staticmethod
+    def insert_option_group(parser):
+        """Add the power chisq options to an argument parser."""
+        group = parser.add_argument_group("Power chisq")
+        group.add_argument(
+            "--chisq-snr-threshold",
+            type=float,
+            help="Minimum SNR to calculate the power chisq",
+        )
+        group.add_argument(
+            "--chisq-bins",
+            default=0,
+            help="Number of frequency bins to use for power "
+            "chisq. Specify an integer for a constant "
+            "number of bins, or a function of template "
+            "attributes. Math functions are allowed, ex. "
+            "'10./math.sqrt((params.mass1+params.mass2)"
+            "/100.)'. Non-integer values will be rounded "
+            "down.",
+        )
+
+    @classmethod
+    def from_cli(cls, args):
+        """Create the power chisq from the options of insert_option_group."""
+        return cls(num_bins=args.chisq_bins, snr_threshold=args.chisq_snr_threshold)
+
     def cached_chisq_bins(self, template, psd):
         from pycbc.opt import LimitedSizeDict
 
@@ -439,7 +467,7 @@ class SingleDetPowerChisq:
             if self.snr_threshold:
                 above = abs(snrv * snr_norm) > self.snr_threshold
                 num_above = above.sum()
-                logging.info("%s above chisq activation threshold" % num_above)
+                logger.info("%s above chisq activation threshold", num_above)
                 above_indices = indices[above]
                 above_snrv = snrv[above]
                 chisq_out = numpy.zeros(len(indices), dtype=numpy.float32)
@@ -526,7 +554,7 @@ class SingleDetSkyMaxPowerChisq(SingleDetPowerChisq):
             if self.snr_threshold:
                 above = abs(snrv) > self.snr_threshold
                 num_above = above.sum()
-                logging.info("%s above chisq activation threshold" % num_above)
+                logger.info("%s above chisq activation threshold", num_above)
                 above_indices = indices[above]
                 above_snrv = snrv[above]
                 u_vals = u_vals[above]

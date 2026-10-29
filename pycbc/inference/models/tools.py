@@ -6,11 +6,14 @@ from distutils.util import strtobool
 import numpy
 import numpy.random
 import tqdm
-from scipy.interpolate import RectBivariateSpline, interp1d
+from scipy import ndimage
+from scipy.interpolate import interp1d
 from scipy.special import i0e, logsumexp
 
 from pycbc.detector import Detector
 from pycbc.distributions import JointDistribution
+
+logger = logging.getLogger(__name__)
 
 # Earth radius in seconds
 EARTH_RADIUS = 0.031
@@ -129,7 +132,7 @@ class DistMarg:
         )
 
         for param in str_to_tuple(marginalize_vector_params, str):
-            logging.info(
+            logger.info(
                 "Marginalizing over %s, %s points from prior", param, self.vsamples
             )
             self.marginalized_vector_priors[param] = pop_prior(param)
@@ -165,7 +168,7 @@ class DistMarg:
                 marginalize_distance_density, int
             )
 
-        logging.info("Marginalizing over distance")
+        logger.info("Marginalizing over distance")
 
         # Take distance out of the variable params since we'll handle it
         # manually now
@@ -180,7 +183,7 @@ class DistMarg:
 
         # (1) prior is using distance
         if dprior.params[0] == "distance":
-            logging.info(
+            logger.info(
                 "Prior is directly on distance, setting up %s grid weights",
                 marginalize_distance_samples,
             )
@@ -193,7 +196,7 @@ class DistMarg:
         elif marginalize_distance_param != "distance":
             waveform_transforms = kwargs["waveform_transforms"]
             pname = dprior.params[0]
-            logging.info("Settings up transform,  prior is in terms of %s", pname)
+            logger.info("Settings up transform,  prior is in terms of %s", pname)
             wtrans = [d for d in waveform_transforms if "distance" not in d.outputs]
             if len(wtrans) == 0:
                 wtrans = None
@@ -205,7 +208,7 @@ class DistMarg:
             cdf = numpy.arange(1, len(d) + 1) / len(d)
             i = interp1d(d, cdf)
             dmin, dmax = d.min(), d.max()
-            logging.info("Distance range %s-%s", dmin, dmax)
+            logger.info("Distance range %s-%s", dmin, dmax)
             x = numpy.linspace(dmin, dmax, int(marginalize_distance_samples) + 1)
             xl, xr = x[:-1], x[1:]
             dist_locs = 0.5 * (xr + xl)
@@ -468,7 +471,7 @@ class DistMarg:
         def make_init():
             self.snr_params = ["tc", "ra", "dec"]
             size = self.marginalize_sky_initial_samples
-            logging.info("drawing samples: %s", size)
+            logger.info("drawing samples: %s", size)
             ra = self.marginalized_vector_priors["ra"].rvs(size=size)["ra"]
             dec = self.marginalized_vector_priors["dec"].rvs(size=size)["dec"]
             tcmin, tcmax = self.marginalized_vector_priors["tc"].bounds["tc"]
@@ -476,7 +479,7 @@ class DistMarg:
             d = {ifo: Detector(ifo, reference_time=tcave) for ifo in self.data}
 
             # What data structure to hold times? Dict of offset -> list?
-            logging.info("sorting into time delay dict")
+            logger.info("sorting into time delay dict")
             dts = []
             for i in range(len(ifos) - 1):
                 dt = d[ifos[0]].time_delay_from_detector(d[ifos[i + 1]], ra, dec, tcave)
@@ -506,7 +509,7 @@ class DistMarg:
             self.tinfo = {}
 
         if ikey not in self.tinfo:
-            logging.info("pregenerating sky pointings")
+            logger.info("pregenerating sky pointings")
             self.tinfo[ikey] = make_init()
 
         dmap, tcmin, tcmax, fp, fc, ra, dec, dtc, bin_prior = self.tinfo[ikey]
@@ -613,6 +616,8 @@ class DistMarg:
         peak_lock_snr=None,
         peak_lock_ratio=1e4,
         peak_lock_region=4,
+        peak_lock_search_samples=None,
+        peak_lock_search_decimate=8,
         **kwargs,
     ):
         """
@@ -634,8 +639,32 @@ class DistMarg:
         peak_lock_region: int
             Number of samples to inclue beyond the strict region
             determined by the relative likelihood
+        peak_lock_search_samples: int
+            How far to search for the peak before each likelihood, in
+            samples, centered on the region locked here. The region is then
+            moved to wherever the peak turned out to be. It has to cover the
+            furthest the peak can move; a warning is logged if the search
+            ends at the edge. Off if not given.
+        peak_lock_search_decimate: int
+            Stride of that search, in samples. It only has to place the
+            peak inside the region, so it must be no wider than one.
 
         """
+        self.peak_lock_search_samples = (
+            None if peak_lock_search_samples is None else int(peak_lock_search_samples)
+        )
+        self.peak_lock_search_decimate = int(peak_lock_search_decimate)
+        self.peak_lock_sample_rate = float(sample_rate)
+
+        # a model whose reference series is fixed has no peak to follow and
+        # provides no coarse_series to look for one with
+        if self.peak_lock_search_samples and not hasattr(self, "coarse_series"):
+            logger.warning(
+                "%s cannot search for the peak, so peak_lock_search_samples is ignored",
+                type(self).__name__,
+            )
+            self.peak_lock_search_samples = None
+
         if "tc" not in self.marginalized_vector_priors:
             return
 
@@ -645,6 +674,8 @@ class DistMarg:
         num_samples = int(tmax * sample_rate)
         self.tstart = dict.fromkeys(self.data, tstart)
         self.num_samples = dict.fromkeys(self.data, num_samples)
+        self.peak_lock_peak = {}
+        self.peak_lock_peak_snr = {}
 
         if snrs is None:
             if not hasattr(self, "ref_snr"):
@@ -666,9 +697,11 @@ class DistMarg:
                 times = z.sample_times
                 peak_time = times[imax]
 
-                logging.info(
+                logger.info(
                     "%s: Max Ref SNR Peak of %s at %s", ifo, peak_snr, peak_time
                 )
+                self.peak_lock_peak[ifo] = float(peak_time)
+                self.peak_lock_peak_snr[ifo] = float(peak_snr)
 
                 if peak_snr > peak_lock_snr:
                     target = peak_snr**2.0 / 2.0 - numpy.log(peak_lock_ratio)
@@ -684,6 +717,7 @@ class DistMarg:
             for ifo in snrs:
                 ts = self.tstart[ifo]
                 te = ts + self.num_samples[ifo] / sample_rate
+                locked = ts, te
 
                 for ifo2 in snrs:
                     if ifo == ifo2:
@@ -696,9 +730,23 @@ class DistMarg:
                     ts = max(ts, ts2 - dt)
                     te = min(te, te2 + dt)
 
+                # an empty intersection is a negative number of samples,
+                # which the kernel reports as an unexplained ValueError
+                if te <= ts:
+                    ts, te = locked
+                    logger.warning(
+                        "%s: the locked regions have no time in common; "
+                        "keeping %s-%s. Widen them with peak_lock_ratio or "
+                        "peak_lock_region, or check the reference "
+                        "parameters",
+                        ifo,
+                        ts,
+                        te,
+                    )
+
                 self.tstart[ifo] = ts
                 self.num_samples[ifo] = int((te - ts) * sample_rate) + 1
-                logging.info(
+                logger.info(
                     "%s: use region %s-%s, %s points",
                     ifo,
                     ts,
@@ -709,6 +757,78 @@ class DistMarg:
         self.tend = self.tstart.copy()
         for ifo in snrs:
             self.tend[ifo] += self.num_samples[ifo] / sample_rate
+        self.peak_lock_start = self.tstart.copy()
+
+    def follow_peak(self, wfs):
+        """
+        Move the locked region to wherever the peak is now
+
+        The region is locked once, around a reference waveform, and the peak
+        it was locked on moves with the parameters. A coarse pass over a
+        wider range says where it went.
+
+        The offset is measured from the region as locked, not from wherever
+        the last call left it, so the region is a function of the current
+        parameters alone. It is found in one detector and applied to all of
+        them, which keeps the delays between them as they were locked.
+
+        Does nothing when the marginalization points were precalculated,
+        since those were drawn over the locked region.
+        """
+        if not getattr(self, "peak_lock_search_samples", None):
+            return
+        # the points were drawn over the region as locked; moving away from
+        # them would lose them silently
+        if hasattr(self, "premarg"):
+            return
+        if not hasattr(self, "peak_lock_start"):
+            return
+
+        # keep_ifos is not set until draw_ifos, which runs after the
+        # reference series is built
+        seen = [
+            i
+            for i in (getattr(self, "keep_ifos", None) or list(wfs))
+            if i in self.peak_lock_peak
+        ]
+        if not seen:
+            return
+        # the loudest, whose peak is the least uncertain in time
+        ifo = max(seen, key=self.peak_lock_peak_snr.get)
+
+        rate = self.peak_lock_sample_rate
+        locked = self.peak_lock_peak[ifo]
+        delta_t = self.peak_lock_search_decimate / rate
+        num = int(self.peak_lock_search_samples / self.peak_lock_search_decimate)
+        start = locked - self.peak_lock_search_samples / rate / 2.0
+        series = abs(numpy.array(self.coarse_series(ifo, wfs, start, delta_t, num)))
+
+        # the peak rarely sits on a coarse sample, and its neighbours say
+        # where between them it does
+        i = int(numpy.argmax(series))
+        if 0 < i < len(series) - 1:
+            a, b, c = series[i - 1], series[i], series[i + 1]
+            curve = a - 2.0 * b + c
+            if curve < 0:
+                i += numpy.clip(0.5 * (a - c) / curve, -0.5, 0.5)
+        elif not getattr(self, "peak_lock_edge_warned", False):
+            # the edge is still the best guess, so the region goes there
+            logger.warning(
+                "%s: the peak search ended at the edge of its "
+                "window, so the peak may be beyond it; widen "
+                "peak_lock_search_samples",
+                ifo,
+            )
+            self.peak_lock_edge_warned = True
+
+        # rounded to a whole sample of the region's own grid: a fractional
+        # offset samples the series at shifted phases, which costs more than
+        # placing the region more precisely gains
+        shift = round((start + i * delta_t - locked) * rate) / rate
+
+        for name in self.peak_lock_start:
+            self.tstart[name] = self.peak_lock_start[name] + shift
+            self.tend[name] = self.tstart[name] + self.num_samples[name] / rate
 
     def draw_ifos(
         self,
@@ -742,7 +862,7 @@ class DistMarg:
             psnrs.append(psnr)
 
         if log:
-            logging.info(
+            logger.info(
                 "Ifos used for SNR based draws: %s, snrs: %s, peak_snr_threshold=%s",
                 keep_ifos,
                 psnrs,
@@ -796,7 +916,7 @@ class DistMarg:
             get_loglr = set_loglr
 
         if self.marginalize_vector_params:
-            logging.debug("Reconstruct vector")
+            logger.debug("Reconstruct vector")
             self.reconstruct_vector = True
             self.reset_vector_params()
             loglr = get_loglr()
@@ -806,7 +926,7 @@ class DistMarg:
             self.reconstruct_vector = False
 
         if self.distance_marginalization:
-            logging.debug("Reconstruct distance")
+            logger.debug("Reconstruct distance")
             # call likelihood to get vector output
             self.reconstruct_distance = True
             _, weights = self.distance_marginalization
@@ -816,7 +936,7 @@ class DistMarg:
             self.reconstruct_distance = False
 
         if self.marginalize_phase:
-            logging.debug("Reconstruct phase")
+            logger.debug("Reconstruct phase")
             self.reconstruct_phase = True
             s, h = get_loglr()
             phasev = numpy.linspace(0, numpy.pi * 2.0, int(1e4), endpoint=False)
@@ -856,8 +976,8 @@ def setup_distance_marg_interpolant(
 
     """
     dist_rescale, _ = dist_marg
-    logging.info("Interpolator valid for SNRs in %s", snr_range)
-    logging.info("Interpolator using grid %s", density)
+    logger.info("Interpolator valid for SNRs in %s", snr_range)
+    logger.info("Interpolator using grid %s", density)
     # approximate maximum shr and hhr values, assuming the true SNR is
     # within the indicated range (and neglecting noise fluctuations)
     snr_min, snr_max = snr_range
@@ -869,23 +989,33 @@ def setup_distance_marg_interpolant(
     shr_min = snr_min**2.0 / smax
     hhr_min = snr_min**2.0 / smax / smax
 
-    shr = numpy.geomspace(shr_min, shr_max, density[0])
-    hhr = numpy.geomspace(hhr_min, hhr_max, density[1])
-    lvals = numpy.zeros((len(shr), len(hhr)))
-    logging.info("Setup up likelihood interpolator")
-    for i, sh in enumerate(tqdm.tqdm(shr)):
-        for j, hh in enumerate(hhr):
+    # The table is uniform in log(sh) and log(hh), so where a point falls in
+    # it is arithmetic. The spline is fixed by assuming the table carries on
+    # flat past its edge, an error that falls by a factor of ~4 per cell
+    # inwards, so the table extends this many cells beyond the range.
+    pad = 8
+
+    def axis(vmin, vmax, num):
+        step = numpy.log(vmax / vmin) / (num - 1)
+        return numpy.log(vmin) + step * numpy.arange(-pad, num + pad), step
+
+    log_shr, dlog_shr = axis(shr_min, shr_max, density[0])
+    log_hhr, dlog_hhr = axis(hhr_min, hhr_max, density[1])
+    lvals = numpy.zeros((len(log_shr), len(log_hhr)))
+    logger.info("Setup up likelihood interpolator")
+    for i, sh in enumerate(tqdm.tqdm(numpy.exp(log_shr))):
+        for j, hh in enumerate(numpy.exp(log_hhr)):
             lvals[i, j] = marginalize_likelihood(
                 sh, hh, distance=dist_marg, phase=phase
             )
-    interp = RectBivariateSpline(shr, hhr, lvals)
+    coeffs = ndimage.spline_filter(lvals, order=3, mode="nearest")
 
     # said once, the first time it happens
     warned = [False]
 
     def warn_out_of_range():
         warned[0] = True
-        logging.warning(
+        logger.warning(
             "A likelihood evaluation asked for a signal to noise ratio "
             "outside marginalize_distance_snr_range %s; beyond it the "
             "distance marginalized likelihood is set to zero, which biases "
@@ -895,8 +1025,10 @@ def setup_distance_marg_interpolant(
 
     def interp_wrapper(x, y, bounds_check=True):
         k = None
+        # a zero-dimensional array is a single point but is not a float
+        scalar = numpy.ndim(x) == 0
         if bounds_check:
-            if isinstance(x, float):
+            if scalar:
                 if x > shr_max or x < shr_min or y > hhr_max or y < hhr_min:
                     if not warned[0]:
                         warn_out_of_range()
@@ -908,9 +1040,20 @@ def setup_distance_marg_interpolant(
                 if not warned[0] and k.any():
                     warn_out_of_range()
 
-        v = interp(x, y, grid=False)
+        # clipped before the log: sh can be negative without phase
+        # marginalization, and the mask does not overwrite a nan
+        index = numpy.empty((2, numpy.size(x)))
+        index[0] = (numpy.log(numpy.clip(x, shr_min, shr_max)) - log_shr[0]) / dlog_shr
+        index[1] = (numpy.log(numpy.clip(y, hhr_min, hhr_max)) - log_hhr[0]) / dlog_hhr
+        v = ndimage.map_coordinates(
+            coeffs, index, order=3, mode="nearest", prefilter=False
+        )
         if k is not None:
             v[k] = -numpy.inf
+        # marginalize_likelihood tells a point from a vector by asking for
+        # a float; a length-one array goes through the weight instead
+        if scalar:
+            return float(v[0])
         return v
 
     return interp_wrapper
@@ -1026,7 +1169,7 @@ def marginalize_likelihood(
             # the number drawn means it rests on a handful of them
             lw = vloglr + logw
             w = numpy.exp(lw - lw.max())
-            logging.info(
+            logger.info(
                 "vector marginalization: %.0f effective of %d",
                 w.sum() ** 2.0 / numpy.vdot(w, w),
                 len(w),

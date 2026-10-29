@@ -41,7 +41,7 @@ from pycbc import DYN_RANGE_FAC, waveform
 from pycbc.filter import matched_filter_core
 from pycbc.types import zeros
 
-logger = logging.getLogger("pycbc.live.snr_optimizer")
+logger = logging.getLogger(__name__)
 
 try:
     import pyswarms as ps
@@ -59,7 +59,7 @@ Nfeval = 0
 start_time = time.time()
 
 
-def callback_func(Xi, convergence=0):
+def callback_func(xk, convergence=0):
     global Nfeval
     logger.info("Currently at %d %s", Nfeval, convergence)
     # Time out if the optimization takes longer than 6 minutes

@@ -60,6 +60,8 @@ from .relbin_cpu import (
 )
 from .tools import DistMarg
 
+logger = logging.getLogger(__name__)
+
 
 def setup_bins(
     f_full,
@@ -108,7 +110,7 @@ def setup_bins(
         if gammas is not None
         else numpy.array([-5.0 / 3, -2.0 / 3, 1.0, 5.0 / 3, 7.0 / 3])
     )
-    logging.info("Using powerlaw indices: %s", ga)
+    logger.info("Using powerlaw indices: %s", ga)
     dalp = chi * 2.0 * numpy.pi / numpy.absolute((f_lo**ga) - (f_hi**ga))
     dphi = numpy.sum(
         numpy.array([numpy.sign(g) * d * (f**g) for g, d in zip(ga, dalp)]),
@@ -245,7 +247,7 @@ class Relative(DistMarg, BaseGaussianNoise):
             # generate fiducial waveform
             f_lo = self.kmin[ifo] * self.df[ifo]
             f_hi = self.kmax[ifo] * self.df[ifo]
-            logging.info(
+            logger.info(
                 "%s: Generating fiducial waveform from %s to %s Hz",
                 ifo,
                 f_lo,
@@ -289,7 +291,7 @@ class Relative(DistMarg, BaseGaussianNoise):
             if numzeros_lo > 0:
                 new_kmin = self.kmin[ifo] + numzeros_lo
                 f_lo = new_kmin * self.df[ifo]
-                logging.info(
+                logger.info(
                     "WARNING! Fiducial waveform starts above "
                     "low-frequency-cutoff, initial bin frequency "
                     "will be %s Hz",
@@ -299,7 +301,7 @@ class Relative(DistMarg, BaseGaussianNoise):
             if numzeros_hi > 0:
                 new_kmax = self.kmax[ifo] - numzeros_hi
                 f_hi = new_kmax * self.df[ifo]
-                logging.info(
+                logger.info(
                     "WARNING! Fiducial waveform terminates below "
                     "high-frequency-cutoff, final bin frequency "
                     "will be %s Hz",
@@ -316,7 +318,7 @@ class Relative(DistMarg, BaseGaussianNoise):
             self.h00[ifo] = numpy.array(curr_wav)  # * tshift
             data_shifted = self.data[ifo] * numpy.conjugate(tshift)
 
-            logging.info("Computing frequency bins")
+            logger.info("Computing frequency bins")
             fbin_ind = setup_bins(
                 f_full=self.f[ifo],
                 f_lo=f_lo,
@@ -324,7 +326,7 @@ class Relative(DistMarg, BaseGaussianNoise):
                 gammas=gammas,
                 eps=float(epsilon),
             )
-            logging.info("Using %s bins for this model", len(fbin_ind))
+            logger.info("Using %s bins for this model", len(fbin_ind))
 
             self.fedges[ifo] = self.f[ifo][fbin_ind]
             self.edges[ifo] = fbin_ind
@@ -343,7 +345,7 @@ class Relative(DistMarg, BaseGaussianNoise):
         self.h00_sparse[ifo] = h00[ifo].copy().take(fbin_ind)
 
         # compute summary data
-        logging.info(
+        logger.info(
             "Calculating summary data at frequency resolution %s Hz",
             self.df[ifo],
         )
@@ -368,13 +370,13 @@ class Relative(DistMarg, BaseGaussianNoise):
                 else:
                     self.ifo_map[ifo] = len(self.edge_unique)
                     self.edge_unique.append(Array(self.fedges[ifo]))
-        logging.info("%s unique ifo layouts", len(self.edge_unique))
+        logger.info("%s unique ifo layouts", len(self.edge_unique))
 
     def setup_antenna(self, earth_rotation, mode, fedges):
         # Calculate the times to evaluate fp/fc
         self.earth_rotation = earth_rotation
         if earth_rotation is not False:
-            logging.info("Enabling frequency-dependent earth rotation")
+            logger.info("Enabling frequency-dependent earth rotation")
             from pycbc.waveform.spa_tmplt import spa_length_in_time
 
             times = spa_length_in_time(
@@ -481,7 +483,7 @@ class Relative(DistMarg, BaseGaussianNoise):
             or self.marginalize_distance
             or self.marginalize_phase
         ):
-            logging.info(
+            logger.info(
                 "Cannot use single template model inside of"
                 "multi_signal if marginalizations are enabled"
             )
@@ -782,30 +784,35 @@ class RelativeTime(Relative):
             self._ref_snr = self.get_snr(wfs)
         return self._ref_snr
 
+    def coarse_series(self, ifo, wfs, tstart, delta_t, num_samples):
+        """The predictor on any grid, used to look for the peak"""
+        sdat = self.sdat[ifo]
+        dtc = tstart - self.end_time[ifo] - self.ta[ifo]
+        return snr_predictor(
+            self.fedges[ifo],
+            dtc,
+            delta_t,
+            num_samples,
+            wfs[ifo][0],
+            wfs[ifo][1],
+            self.h00_sparse[ifo],
+            sdat["a0"],
+            sdat["a1"],
+            sdat["b0"],
+            sdat["b1"],
+        )
+
     def get_snr(self, wfs):
         """Return hp/hc maximized SNR time series"""
         delta_t = 1.0 / self.sample_rate
+        self.follow_peak(wfs)
         snrs = {}
         for ifo in wfs:
-            sdat = self.sdat[ifo]
-            dtc = self.tstart[ifo] - self.end_time[ifo] - self.ta[ifo]
-
-            snr = snr_predictor(
-                self.fedges[ifo],
-                dtc - delta_t * 2.0,
-                delta_t,
-                self.num_samples[ifo] + 4,
-                wfs[ifo][0],
-                wfs[ifo][1],
-                self.h00_sparse[ifo],
-                sdat["a0"],
-                sdat["a1"],
-                sdat["b0"],
-                sdat["b1"],
+            start = self.tstart[ifo] - delta_t * 2.0
+            snr = self.coarse_series(
+                ifo, wfs, start, delta_t, self.num_samples[ifo] + 4
             )
-            snrs[ifo] = TimeSeries(
-                snr, delta_t=delta_t, epoch=self.tstart[ifo] - delta_t * 2.0
-            )
+            snrs[ifo] = TimeSeries(snr, delta_t=delta_t, epoch=start)
         return snrs
 
     @catch_waveform_error
@@ -919,34 +926,41 @@ class RelativeTimeDom(RelativeTime):
 
     name = "relative_time_dom"
 
+    def sh_series(self, ifo, wfs, tstart, delta_t, num_samples):
+        """The predictor on any grid, as the sh and hh it returns"""
+        sdat = self.sdat[ifo]
+        dtc = tstart - self.end_time[ifo] - self.ta[ifo]
+        return snr_predictor_dom(
+            self.fedges[ifo],
+            dtc,
+            delta_t,
+            num_samples,
+            wfs[ifo][0],
+            self.h00_sparse[ifo],
+            sdat["a0"],
+            sdat["a1"],
+            sdat["b0"],
+            sdat["b1"],
+        )
+
+    def coarse_series(self, ifo, wfs, tstart, delta_t, num_samples):
+        """The predictor on any grid, used to look for the peak"""
+        return self.sh_series(ifo, wfs, tstart, delta_t, num_samples)[0]
+
     def get_snr(self, wfs):
         """Return hp/hc maximized SNR time series"""
         delta_t = 1.0 / self.sample_rate
+        self.follow_peak(wfs)
         snrs = {}
         self.sh = {}
         self.hh = {}
         for ifo in wfs:
-            sdat = self.sdat[ifo]
-            dtc = self.tstart[ifo] - self.end_time[ifo] - self.ta[ifo]
-
-            sh, hh = snr_predictor_dom(
-                self.fedges[ifo],
-                dtc - delta_t * 2.0,
-                delta_t,
-                self.num_samples[ifo] + 4,
-                wfs[ifo][0],
-                self.h00_sparse[ifo],
-                sdat["a0"],
-                sdat["a1"],
-                sdat["b0"],
-                sdat["b1"],
-            )
+            start = self.tstart[ifo] - delta_t * 2.0
+            sh, hh = self.sh_series(ifo, wfs, start, delta_t, self.num_samples[ifo] + 4)
             snr = TimeSeries(
                 abs(sh[2:-2]) / hh**0.5, delta_t=delta_t, epoch=self.tstart[ifo]
             )
-            self.sh[ifo] = TimeSeries(
-                sh, delta_t=delta_t, epoch=self.tstart[ifo] - delta_t * 2.0
-            )
+            self.sh[ifo] = TimeSeries(sh, delta_t=delta_t, epoch=start)
             self.hh[ifo] = hh
             snrs[ifo] = snr
 
