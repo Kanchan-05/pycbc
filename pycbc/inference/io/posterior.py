@@ -72,17 +72,14 @@ def write_samples_to_file(fp, samples, parameters=None, group=None):
 
     """
     # check data dimensions; we'll just use the first array in samples
-    arr = list(samples.values())[0]
+    arr = next(iter(samples.values()))
     if not arr.ndim == 1:
         raise ValueError("samples must be 1D arrays")
     niterations = arr.size
     assert all(len(p) == niterations for p in samples.values()), (
         "all samples must have the same shape"
     )
-    if group is not None:
-        group = group + "/{name}"
-    else:
-        group = fp.samples_group + "/{name}"
+    group = (group if group is not None else fp.samples_group) + "/{name}"
     if parameters is None:
         parameters = samples.keys()
     # loop over number of dimensions

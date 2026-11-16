@@ -93,10 +93,7 @@ def read_events_from_config(cp):
     samples_files = []
     for event in events:
         section = "-".join(["event", event])
-        if cp.has_option(section, "label"):
-            label = cp.get(section, "label")
-        else:
-            label = event
+        label = cp.get(section, "label") if cp.has_option(section, "label") else event
         cf = shlex.split(cp.get(section, "config-files"))
         sf = shlex.split(cp.get(section, "samples-files"))
         labels.append(label)
@@ -161,9 +158,14 @@ diagnostics = inffu.get_diagnostic_plots(workflow)
 # sections for output HTML pages
 rdir = layout.SectionNumber(
     "results",
-    ["detector_sensitivity", "priors", "posteriors"]
-    + diagnostics
-    + ["config_files", "workflow"],
+    [
+        "detector_sensitivity",
+        "priors",
+        "posteriors",
+        *diagnostics,
+        "config_files",
+        "workflow",
+    ],
 )
 
 # make results directories
@@ -242,7 +244,7 @@ for num_event, event in enumerate(events):
         workflow,
         [samples_filelist[0]],
         rdir[base],
-        tags=opts.tags + [event],
+        tags=[*opts.tags, event],
         hdf_group="data",
     )
 

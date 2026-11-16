@@ -89,10 +89,7 @@ def make_padded_frequency_series(vec, filter_tlen=None, delta_f=None):
         vectilde = FrequencySeries(
             zeros(flen, dtype=complex_same_precision_as(vec)), delta_f=1.0, copy=False
         )
-        if len(vectilde) < len(vec):
-            cplen = len(vectilde)
-        else:
-            cplen = len(vec)
+        cplen = min(len(vectilde), len(vec))
         vectilde[0:cplen] = vec[0:cplen]
         delta_f = vec.delta_f
 
@@ -178,7 +175,7 @@ def get_waveform(
     return make_padded_frequency_series(hvec, filter_tlen, delta_f=delta_f)
 
 
-aprs = sorted(list(set(td_approximants() + fd_approximants())))
+aprs = sorted(set(td_approximants() + fd_approximants()))
 
 # File output Settings
 parser = ArgumentParser(description=__doc__)
@@ -357,7 +354,7 @@ if options.total_mass_divide and options.highmass_approximant is None:
 
 if options.mchirp_window is None:
 
-    def outside_mchirp_window(template_mchirp, signal_mchirp):
+    def outside_mchirp_window(template_mchirp, signal_mchirp):  # noqa: ARG001
         return False
 elif "," in options.mchirp_window:
     # asymmetric chirp mass window
@@ -377,7 +374,7 @@ else:
 
 if options.tau0_window is None:
 
-    def outside_tau0_window(template_tau0, signal_tau0, window):
+    def outside_tau0_window(template_tau0, signal_tau0, window):  # noqa: ARG001
         return False
 else:
 

@@ -113,10 +113,10 @@ class CPNestSampler(BaseSampler):
 
     @property
     def niterations(self):
-        return len(tuple(self.samples.values())[0])
+        return len(next(iter(self.samples.values())))
 
     @classmethod
-    def from_config(cls, cp, model, output_file=None, nprocesses=1, use_mpi=False):
+    def from_config(cls, cp, model, output_file=None, nprocesses=1, use_mpi=False):  # noqa: ARG003
         """
         Loads the sampler from the given config file.
         """
@@ -175,11 +175,10 @@ class CPNestSampler(BaseSampler):
 
     @property
     def samples(self):
-        samples_dict = {
+        return {
             p: self._sampler.posterior_samples[p]
             for p in self.posterior_samples.dtype.names
         }
-        return samples_dict
 
     def set_initial_conditions(self, initial_distribution=None, samples_file=None):
         """

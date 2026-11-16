@@ -53,10 +53,7 @@ def config_from_config(cp, section, skip_opts=None):
 
 def read_inference_settings_from_config(cp, section):
     """Loads the config parser and gets the number of inference runs to do."""
-    if cp.has_option(section, "nruns"):
-        nruns = int(cp.get(section, "nruns"))
-    else:
-        nruns = 1
+    nruns = int(cp.get(section, "nruns")) if cp.has_option(section, "nruns") else 1
     return config_from_config(cp, section, skip_opts=["nruns"]), nruns
 
 
@@ -190,10 +187,15 @@ else:
 # sections for output HTML pages
 rdir = layout.SectionNumber(
     "results",
-    pp_dir
-    + ["detector_sensitivity", "priors", "posteriors"]
-    + diagnostics
-    + ["config_files", "workflow"],
+    [
+        *pp_dir,
+        "detector_sensitivity",
+        "priors",
+        "posteriors",
+        *diagnostics,
+        "config_files",
+        "workflow",
+    ],
 )
 
 # make results directories
@@ -276,7 +278,7 @@ for num_inj in range(n_injections):
             out_dir=injection_file_dir,
         )
         node, injection_file = create_injections_exe.create_node(
-            [config_file], seed=seed, tags=opts.tags + [event]
+            [config_file], seed=seed, tags=[*opts.tags, event]
         )
         node.add_opt("--ninjections", 1)
         sub_workflow += node
@@ -294,7 +296,7 @@ for num_inj in range(n_injections):
         sub_workflow.cp, "inference", ifos=sub_workflow.ifos, out_dir=samples_file_dir
     )
     for nn in range(nruns):
-        tags = opts.tags + [event]
+        tags = [*opts.tags, event]
         if nruns > 1:
             tags.append(str(nn))
         node, samples_file = inference_exe.create_node(
@@ -331,7 +333,7 @@ for num_inj in range(n_injections):
         sub_workflow,
         [samples_files[0]],
         rdir[base],
-        tags=opts.tags + [event],
+        tags=[*opts.tags, event],
         hdf_group="data",
     )
 
@@ -381,7 +383,7 @@ if do_pp_test:
     pp_plots = []
     inj_recovery_plots = []
     for pi, param in enumerate(pp_params):
-        tags = opts.tags + [f"PARAM_{pi}"]
+        tags = [*opts.tags, f"PARAM_{pi}"]
         # the pp plot
         pp_plot = inffu.make_inference_pp_plot(
             pp_workflow,
@@ -405,7 +407,7 @@ if do_pp_test:
         )[0]
         inj_recovery_plots.append(injrec_plot)
     # add to the results page
-    pp_files = [(pp_table,)] + list(zip(pp_plots, inj_recovery_plots))
+    pp_files = [(pp_table,), *list(zip(pp_plots, inj_recovery_plots, strict=True))]
     layout.two_column_layout(rdir[pp_section], pp_files)
     # add to the main workflow
     workflow += pp_workflow

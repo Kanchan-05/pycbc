@@ -156,8 +156,12 @@ hdrs = [
 
 dsets = ["stat", "ifar", "fap", "ifar_exc", "fap_exc"]
 formats = ["%5.2f", "%5.2f", "%5.2e", "%5.2f", "%5.2e"]
-tbl = [[h, fmt % d[dst][n]] for fmt, dst, h in zip(formats, dsets, hdrs) if dst in d]
-headers, table = zip(*tbl)
+tbl = [
+    [h, fmt % d[dst][n]]
+    for fmt, dst, h in zip(formats, dsets, hdrs, strict=True)
+    if dst in d
+]
+headers, table = zip(*tbl, strict=True)
 headers = list(headers)
 table = list(table)
 if args.include_gracedb_link:
@@ -218,7 +222,7 @@ for ifo in files:
 
     trig_dict = {
         k: numpy.array([d[k][i]])
-        for k in d.keys()
+        for k in d
         if not k.endswith("_template")
         and k not in ["gating", "search", "template_boundaries"]
     }
@@ -237,7 +241,6 @@ for ifo in files:
     headers.append("UTC&nbsp;End&nbsp;Time")
     headers.append("GPS&nbsp;End&nbsp;time")
 
-    # headers.append("Stat")
     # Determine statistic naming
     if args.sngl_ranking == "newsnr":
         sngl_stat_name = "Reweighted SNR"

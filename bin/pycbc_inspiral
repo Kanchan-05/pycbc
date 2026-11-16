@@ -43,10 +43,8 @@ def update_progress(p, u, n):
     """Updates a file 'progress.txt' with a value 0 .. 1.0 when enough (filtering) progress was made"""
     global last_progress_update
     if p > last_progress_update + u:
-        f = open(n, "w")
-        if f:
+        with open(n, "w") as f:
             f.write(f"{p:.4f}")
-            f.close()
         last_progress_update = p
 
 
@@ -136,7 +134,6 @@ parser.add_argument(
     default=0,
     help="Length of clustering window in seconds. Set to 0 to disable clustering.",
 )
-parser.add_argument("--bank-veto-bank-file", type=str, help="FIXME: ADD")
 parser.add_argument("--chisq-threshold", type=float, default=0, help="FIXME: ADD")
 parser.add_argument("--chisq-delta", type=float, default=0, help="FIXME: ADD")
 parser.add_argument(
@@ -260,6 +257,7 @@ fft.insert_fft_option_group(parser)
 pycbc.opt.insert_optimization_option_group(parser)
 pycbc.inject.insert_injfilterrejector_option_group(parser)
 vetoes.SingleDetPowerChisq.insert_option_group(parser)
+vetoes.SingleDetBankVeto.insert_option_group(parser)
 vetoes.SingleDetAutoChisq.insert_option_group(parser)
 SingleDetSGChisq.insert_option_group(parser)
 opt = parser.parse_args()
@@ -360,10 +358,8 @@ def template_triggers(t_num):
             out_vals["psd_var_val"] = pycbc.psd.find_trigger_value(
                 psd_var, out_vals["time_index"], opt.gps_start_time, opt.sample_rate
             )
-        # print(idx, out_vals['time_index'])
 
         out_vals_all.append(copy.deepcopy(out_vals))
-        # print(out_vals_all)
     return out_vals_all, tparam
 
 
@@ -487,15 +483,9 @@ with ctx:
     template_mem = zeros(tlen, dtype=complex64)
     cluster_window = int(opt.cluster_window * gwstrain.sample_rate)
 
-    if opt.cluster_window == 0.0:
-        use_cluster = False
-    else:
-        use_cluster = True
+    use_cluster = opt.cluster_window != 0.0
 
-    if hasattr(ctx, "num_threads"):
-        ncores = ctx.num_threads
-    else:
-        ncores = 1
+    ncores = ctx.num_threads if hasattr(ctx, "num_threads") else 1
     if opt.multiprocessing_nprocesses:
         ncores *= opt.multiprocessing_nprocesses
 
@@ -516,15 +506,7 @@ with ctx:
         cluster_function=opt.cluster_function,
     )
 
-    bank_chisq = vetoes.SingleDetBankVeto(
-        opt.bank_veto_bank_file,
-        flen,
-        delta_f,
-        flow,
-        complex64,
-        phase_order=opt.order,
-        approximant=opt.approximant,
-    )
+    bank_chisq = vetoes.SingleDetBankVeto.from_cli(opt)
 
     power_chisq = vetoes.SingleDetPowerChisq.from_cli(opt)
 
@@ -546,13 +528,13 @@ with ctx:
         approximant=opt.approximant,
         out=template_mem,
         max_template_length=opt.max_template_length,
-        enable_compressed_waveforms=True if opt.use_compressed_waveforms else False,
+        enable_compressed_waveforms=opt.use_compressed_waveforms,
         waveform_decompression_method=opt.waveform_decompression_method
         if opt.use_compressed_waveforms
         else None,
     )
 
-    sg_chisq = SingleDetSGChisq.from_cli(opt, bank, opt.chisq_bins)
+    sg_chisq = SingleDetSGChisq.from_cli(opt, bank)
 
     logger.info("Full template bank size: %s", len(bank))
     bank.template_thinning(inj_filter_rejector)

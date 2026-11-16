@@ -94,10 +94,7 @@ trigf = [HFile(f, "r") for f in opts.trigger_files]
 # Parse which inclusive background to use for the plotting
 h_inc_back_num = opts.use_hierarchical_level
 
-if opts.use_exclusive_ifar:
-    ifar_str = "ifar_exc"
-else:
-    ifar_str = "ifar"
+ifar_str = "ifar_exc" if opts.use_exclusive_ifar else "ifar"
 
 try:
     h_iterations = max([f.attrs["hierarchical_removal_iterations"] for f in trigf])
@@ -281,7 +278,7 @@ if opts.open_box:
     max_ifar = max(fore_ifar)
 
     if h_inc_back_num > 0:
-        max_ifar = max(max_ifar, max(h_rm_ifar))
+        max_ifar = max(max_ifar, max(h_rm_ifar))  # noqa: PLW3301
         plt.loglog(
             h_rm_ifar,
             h_rm_cumnum,

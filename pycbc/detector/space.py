@@ -192,7 +192,7 @@ def cut_channels(tdi_dict, remove_garbage=False, t0=1e4):
         Default 1e4.
 
     """
-    for chan in tdi_dict.keys():
+    for chan in tdi_dict:
         if remove_garbage:
             dt = tdi_dict[chan].delta_t
             pad_idx = int(t0 / dt)
@@ -522,11 +522,9 @@ class _LDCDetector(AbsSpaceDet):
             self.proj_init.set_strain(self.sample_times, hp, hc)
 
         # project the signal
-        wf_proj = self.proj_init.compute_gw_response(
+        return self.proj_init.compute_gw_response(
             self.sample_times, self.proj_init.LINKS
         )
-
-        return wf_proj
 
     def project_wave(
         self,
@@ -656,10 +654,7 @@ class _LDCDetector(AbsSpaceDet):
             )
 
         # processing
-        tdi_dict = cut_channels(
-            tdi_dict, remove_garbage=self.remove_garbage, t0=self.t0
-        )
-        return tdi_dict
+        return cut_channels(tdi_dict, remove_garbage=self.remove_garbage, t0=self.t0)
 
 
 class _FLRDetector(AbsSpaceDet):
@@ -742,9 +737,8 @@ class _FLRDetector(AbsSpaceDet):
         # class initialization
         self.tdi_init = None
         self.tdi_chan = "AET"
-        if "tdi_chan" in kwargs:
-            if kwargs["tdi_chan"] is not None and kwargs["tdi_chan"] in "XYZ":
-                self.tdi_chan = "XYZ"
+        if kwargs.get("tdi_chan") is not None and kwargs["tdi_chan"] in "XYZ":
+            self.tdi_chan = "XYZ"
 
     @property
     def sky_coords(self):
@@ -881,9 +875,7 @@ class _FLRDetector(AbsSpaceDet):
 
         # project the signal
         self.tdi_init.get_projections(wf, lamb, beta, t0=self.t0)
-        wf_proj = self.tdi_init.y_gw
-
-        return wf_proj
+        return self.tdi_init.y_gw
 
     def project_wave(
         self,
@@ -1005,10 +997,7 @@ class _FLRDetector(AbsSpaceDet):
                 tdi_obs[i], delta_t=self.dt, epoch=self.start_time
             )
 
-        tdi_dict = cut_channels(
-            tdi_dict, remove_garbage=self.remove_garbage, t0=self.t0
-        )
-        return tdi_dict
+        return cut_channels(tdi_dict, remove_garbage=self.remove_garbage, t0=self.t0)
 
 
 _backends = {
@@ -1042,7 +1031,7 @@ class SpaceDetector(AbsSpaceDet):
 
     def __init__(self, detector_name, reference_time=None, backend="LDC", **kwargs):
         super().__init__(detector_name, reference_time, **kwargs)
-        if backend in _backends[self.det].keys():
+        if backend in _backends[self.det]:
             c = _backends[self.det][backend]
             self.backend = c(detector_name, reference_time, **kwargs)
         else:

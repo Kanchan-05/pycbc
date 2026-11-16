@@ -99,7 +99,7 @@ def make_range_plot(
             "plot_range",
             ifos=workflow.ifos,
             out_dir=out_dir,
-            tags=[tag] + tags,
+            tags=[tag, *tags],
         ).create_node()
         node.add_input_list_opt("--psd-files", psd_files)
         node.new_output_file_opt(workflow.analysis_time, ".png", "--output-file")
@@ -170,7 +170,7 @@ def make_foreground_table(
 ):
 
     if hierarchical_level is not None and tags:
-        tags = [(f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}")] + tags
+        tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}", *tags]
     elif hierarchical_level is not None and not tags:
         tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}"]
     elif hierarchical_level is None and not tags:
@@ -209,7 +209,7 @@ def make_sensitivity_plot(
             "plot_sensitivity",
             ifos=workflow.ifos,
             out_dir=out_dir,
-            tags=[tag] + tags,
+            tags=[tag, *tags],
         ).create_node()
         node.add_input_opt("--injection-file", inj_file)
         node.new_output_file_opt(inj_file.segment, ".png", "--output-file")
@@ -373,7 +373,7 @@ def make_ifar_plot(
     of IFAR values.
     """
     if hierarchical_level is not None and tags:
-        tags = [(f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}")] + tags
+        tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}", *tags]
     elif hierarchical_level is not None and not tags:
         tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}"]
     elif hierarchical_level is None and not tags:
@@ -391,13 +391,15 @@ def make_ifar_plot(
     return node.output_files[0]
 
 
+# hierarchical_level and require are unused; the signature matches the other
+# plotting functions
 def make_farstat_plot(
     workflow,
     trigger_files,
     out_dir,
     tags=None,
-    hierarchical_level=None,
-    require=None,
+    hierarchical_level=None,  # noqa: ARG001
+    require=None,  # noqa: ARG001
     executable="page_farstat",
 ):
     """
@@ -473,7 +475,7 @@ def make_foundmissed_plot(
             "plot_foundmissed",
             ifos=workflow.ifos,
             out_dir=out_dir,
-            tags=[tag] + tags,
+            tags=[tag, *tags],
         )
         node = exe.create_node()
         ext = ".html" if exe.has_opt("dynamic") else ".png"
@@ -489,7 +491,7 @@ def make_snrratehist_plot(
 ):
 
     if hierarchical_level is not None and tags:
-        tags = [(f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}")] + tags
+        tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}", *tags]
     elif hierarchical_level is not None and not tags:
         tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}"]
     elif hierarchical_level is None and not tags:
@@ -526,7 +528,7 @@ def make_snrifar_plot(
 ):
 
     if hierarchical_level is not None and tags:
-        tags = [(f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}")] + tags
+        tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}", *tags]
     elif hierarchical_level is not None and not tags:
         tags = [f"HIERARCHICAL_LEVEL_{hierarchical_level:02d}"]
     elif hierarchical_level is None and not tags:
@@ -741,7 +743,7 @@ def make_bank_compression_plots(workflow, bank_files, out_dir, tags=None):
             "plot_bank_compression",
             ifos=workflow.ifos,
             out_dir=out_dir,
-            tags=[tag] + tags,
+            tags=[tag, *tags],
         ).create_node()
         node.add_input_list_opt("--bank-files", bank_files)
 

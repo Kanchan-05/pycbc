@@ -55,9 +55,11 @@ logger = logging.getLogger(__name__)
 
 sim = libutils.import_optional("lalsimulation")
 
+# The lambdas look up the functions only when called: if lalsimulation is not
+# installed, sim is a stub that raises ImportError on any attribute access.
 injection_func_map = {
-    np.dtype(float32): lambda *args: sim.SimAddInjectionREAL4TimeSeries(*args),
-    np.dtype(float64): lambda *args: sim.SimAddInjectionREAL8TimeSeries(*args),
+    np.dtype(float32): lambda *args: sim.SimAddInjectionREAL4TimeSeries(*args),  # noqa: PLW0108
+    np.dtype(float64): lambda *args: sim.SimAddInjectionREAL8TimeSeries(*args),  # noqa: PLW0108
 }
 
 # Map parameter names used in pycbc to names used in the sim_inspiral
@@ -128,7 +130,7 @@ def projector(detector_name, inj, hp, hc, distance_scale=1):
     logger.info("Injecting at %s, method is %s", tc, projection_method)
 
     # compute the detector response and add it to the strain
-    signal = detector.project_wave(
+    return detector.project_wave(
         hp_tapered,
         hc_tapered,
         ra,
@@ -137,7 +139,6 @@ def projector(detector_name, inj, hp, hc, distance_scale=1):
         method=projection_method,
         reference_time=tc,
     )
-    return signal
 
 
 def legacy_approximant_name(apx):
@@ -150,7 +151,7 @@ def legacy_approximant_name(apx):
     try:
         order = sim.GetOrderFromString(apx)
     except:
-        print("Warning: Could not read phase order from string, using default")
+        logger.warning("Could not read phase order from string, using default")
         order = -1
     name = sim.GetStringFromApproximant(sim.GetApproximantFromString(apx))
     return name, order
@@ -432,10 +433,7 @@ class _HDFInjectionSet(metaclass=ABCMeta):
             if injvals[k].dtype.kind == "S":
                 injvals[k] = injvals[k].astype("U")
         # if there were no variable args, then we only have a single injection
-        if len(parameters) == 0:
-            numinj = 1
-        else:
-            numinj = tuple(injvals.values())[0].size
+        numinj = 1 if len(parameters) == 0 else next(iter(injvals.values())).size
         # add any static args in the file
         try:
             # ensure parameter names are string types
@@ -612,7 +610,7 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
         # There is a case where injections are not added to the data, but
         # still need to be generated for the match threshold option in the
         # InjFilterRejector. User needs to be careful with this though!
-        if inj_filter_rejector is not None:
+        if inj_filter_rejector is not None:  # noqa: SIM102
             if inj_filter_rejector.match_threshold and not generate_injections:
                 warn_msg = (
                     "You have asked to use the match threshold option in "
@@ -730,10 +728,7 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
             h(t) corresponding to the injection.
 
         """
-        if f_lower is None:
-            f_l = inj.f_lower
-        else:
-            f_l = f_lower
+        f_l = inj.f_lower if f_lower is None else f_lower
 
         if inj["approximant"] in fd_det:
             strain = get_td_det_waveform_from_fd_det(
@@ -1366,7 +1361,7 @@ class SGBurstInjectionSet:
         self.table = lsctables.SimBurstTable.get_table(self.indoc)
         self.extra_args = kwds
 
-    def apply(self, strain, detector_name, f_lower=None, distance_scale=1):
+    def apply(self, strain, detector_name, f_lower=None, distance_scale=1):  # noqa: ARG002
         """
         Add injections (as seen by a particular detector) to a time series.
 
@@ -1399,7 +1394,6 @@ class SGBurstInjectionSet:
             )
 
         lalstrain = strain.lal()
-        # detector = Detector(detector_name)
         earth_travel_time = lal.REARTH_SI / lal.C_SI
         t0 = float(strain.start_time) - earth_travel_time
         t1 = float(strain.end_time) + earth_travel_time

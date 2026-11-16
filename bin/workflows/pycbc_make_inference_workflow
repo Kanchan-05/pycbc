@@ -109,19 +109,13 @@ def read_events_from_config(cp):
     for event in events:
         section = "-".join(["event", event])
         # get the label
-        if cp.has_option(section, "label"):
-            label = cp.get(section, "label")
-        else:
-            label = event
+        label = cp.get(section, "label") if cp.has_option(section, "label") else event
         labels.append(label)
         # convert the config-file options to a command line string
         cli = cp.section_to_cli(section, skip_opts=["label", "nruns"])
         cpopts.append(cfparser.parse_args(shlex.split(cli)))
         # get the number of times to run the event
-        if cp.has_option(section, "nruns"):
-            nrun = int(cp.get(section, "nruns"))
-        else:
-            nrun = 1
+        nrun = int(cp.get(section, "nruns")) if cp.has_option(section, "nruns") else 1
         if nrun < 1:
             raise ValueError("nruns must be >= 1")
         nruns.append(nrun)
@@ -199,9 +193,14 @@ diagnostics = inffu.get_diagnostic_plots(workflow)
 # sections for output HTML pages
 rdir = layout.SectionNumber(
     "results",
-    ["detector_sensitivity", "priors", "posteriors"]
-    + diagnostics
-    + ["config_files", "workflow"],
+    [
+        "detector_sensitivity",
+        "priors",
+        "posteriors",
+        *diagnostics,
+        "config_files",
+        "workflow",
+    ],
 )
 
 # make results directories
@@ -266,7 +265,7 @@ for num_event, event in enumerate(events):
         sub_workflow.cp, "inference", ifos=sub_workflow.ifos, out_dir=samples_file_dir
     )
     for nn in range(nrun):
-        tags = opts.tags + [event]
+        tags = [*opts.tags, event]
         if nrun > 1:
             tags.append(str(nn))
         node, samples_file = inference_exe.create_node(
@@ -300,7 +299,7 @@ for num_event, event in enumerate(events):
         sub_workflow,
         [samples_files[0]],
         rdir[base],
-        tags=opts.tags + [event],
+        tags=[*opts.tags, event],
         hdf_group="data",
     )
 

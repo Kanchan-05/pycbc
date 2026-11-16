@@ -406,8 +406,7 @@ def get_cov_params(
         quadparam2=quadparam2,
     )
     # and then mus -> xis
-    xis = get_covaried_params(mus, metric_params.evecs_cv[f_upper])
-    return xis
+    return get_covaried_params(mus, metric_params.evecs_cv[f_upper])
 
 
 def get_conv_params(
@@ -466,8 +465,7 @@ def get_conv_params(
         quadparam2=quadparam2,
     )
     # and lambdas -> mus
-    mus = get_mu_params(lambdas, metric_params, f_upper)
-    return mus
+    return get_mu_params(lambdas, metric_params, f_upper)
 
 
 def get_mu_params(lambdas, metric_params, f_upper):
@@ -662,8 +660,7 @@ def calc_point_dist(vs, entry):
 
     """
     chi_diffs = vs - entry
-    val = ((chi_diffs) * (chi_diffs)).sum()
-    return val
+    return ((chi_diffs) * (chi_diffs)).sum()
 
 
 def test_point_dist(point_1_chis, point_2_chis, distance_threshold):
@@ -743,7 +740,7 @@ def find_max_and_min_frequencies(name, mass_range_params, freqs):
     ADD DOCS
     """
     cutoff_fns = pnutils.named_frequency_cutoffs
-    if name not in cutoff_fns.keys():
+    if name not in cutoff_fns:
         err_msg = f"{name} not recognized as a valid cutoff frequency choice."
         err_msg += "Recognized choices: " + " ".join(cutoff_fns.keys())
         raise ValueError(err_msg)
@@ -822,7 +819,7 @@ def return_nearest_cutoff(name, mass_dict, freqs):
     if len(freqs) == 1:
         return numpy.zeros(len(mass_dict["m1"]), dtype=float) + freqs[0]
     cutoff_fns = pnutils.named_frequency_cutoffs
-    if name not in cutoff_fns.keys():
+    if name not in cutoff_fns:
         err_msg = f"{name} not recognized as a valid cutoff frequency choice."
         err_msg += "Recognized choices: " + " ".join(cutoff_fns.keys())
         raise ValueError(err_msg)

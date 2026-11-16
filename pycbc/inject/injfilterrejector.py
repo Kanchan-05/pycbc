@@ -391,7 +391,9 @@ class InjFilterRejector:
         # Create individual intervals
         starts = inj_times - window
         ends = inj_times + window
-        intervals = segmentlist([segment(s, e) for s, e in zip(starts, ends)])
+        intervals = segmentlist(
+            [segment(s, e) for s, e in zip(starts, ends, strict=True)]
+        )
         intervals.coalesce()
 
         return np.array(intervals)
@@ -575,7 +577,7 @@ class InjFilterRejector:
                 self._short_psd_storage[id(segment.psd)] = red_psd
 
             # Set htilde to be the current short template
-            if not t_num == self._short_template_id:
+            if t_num != self._short_template_id:
                 if self._short_template_mem is None:
                     wav_len = 1 + int(self.coarsematch_fmax / self.coarsematch_deltaf)
                     self._short_template_mem = zeros(wav_len, dtype=np.complex64)

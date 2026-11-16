@@ -100,7 +100,10 @@ class Injections:
         self.inj_params = self.injgroup.keys()
         self.ninj = len(self.injgroup[self.inj_params[0]][:])
         self.inj_hashes = np.array(
-            [hash(v) for v in zip(*[self.injgroup[p] for p in hash_inj_params])]
+            [
+                hash(v)
+                for v in zip(*[self.injgroup[p] for p in hash_inj_params], strict=True)
+            ]
         )
         if not np.all(self.inj_hashes):
             raise RuntimeError("Not all injection hashes were finite")
@@ -116,6 +119,9 @@ class Injections:
                 return (self.inj_hashes == other.inj_hashes).all()
             return False
         return False
+
+    # Defining __eq__ makes instances unhashable; make that explicit
+    __hash__ = None
 
 
 class RunInjectionResults:
@@ -210,7 +216,7 @@ class RunInjectionResults:
                     "coa_phase",
                     "end_time",
                 ]:
-                    if param in self.trigger_merge_dict[ifo]["data"].keys():
+                    if param in self.trigger_merge_dict[ifo]["data"]:
                         idx = fdict[ifo]["trigger_id"]
                         vals = self.trigger_merge_dict[ifo]["data"][param][:][idx]
                         # A hack:
@@ -254,6 +260,9 @@ class RunInjectionResults:
             self.injections == other.injections
         )
 
+    # Defining __eq__ makes instances unhashable; make that explicit
+    __hash__ = None
+
     def write_to_hdf(self, outpath):
         outfp = File(outpath, "w")
         outfp.attrs["injection_set"] = self.injname
@@ -263,7 +272,7 @@ class RunInjectionResults:
         outfp.attrs["detector_2"] = self.inj_dets[1]
         self.injfile.copy("injections", outfp)
         missed_group = outfp.create_group("missed")
-        for col in self.missed.keys():
+        for col in self.missed:
             missed_group.create_dataset(col, data=self.missed[col])
         for fname in ["found", "found_after_vetoes"]:
             fgroup = outfp.create_group(fname)
@@ -275,7 +284,7 @@ class RunInjectionResults:
                 fgroup.create_dataset(col, data=fdict[col])
             for ifo in self.inj_dets:
                 igroup = fgroup.create_group(ifo)
-                for col in fdict[ifo].keys():
+                for col in fdict[ifo]:
                     igroup.create_dataset(col, data=fdict[ifo][col])
         outfp.close()
 
@@ -288,7 +297,7 @@ def populate_injection_group(fgroup, fidx, fdict, ifos):
         fgroup.create_dataset(key, data=fdict[key][fidx])
     for ifo in ifos:
         igroup = fgroup.create_group(ifo)
-        for key in fdict[ifo].keys():
+        for key in fdict[ifo]:
             igroup.create_dataset(key, data=fdict[ifo][key][fidx])
 
 
@@ -308,7 +317,7 @@ def compare_found_injs(reference_run, comparison_run, outfp):
             "Calculating indices of found/missed injections between"
             " reference and comparison runs"
         )
-        both, ref_both_idx, com_both_idx = np.intersect1d(
+        _, ref_both_idx, com_both_idx = np.intersect1d(
             ref_injs, com_injs, return_indices=True
         )
         # Now we want to find the indices of those injections found in one

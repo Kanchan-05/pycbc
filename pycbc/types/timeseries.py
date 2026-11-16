@@ -102,18 +102,12 @@ class TimeSeries(Array):
         """Check if the sample rate is close enough to allow operations"""
         # compare our delta_t either to a another time series' or
         # to a given sample rate (float)
-        if isinstance(other, TimeSeries):
-            odelta_t = other.delta_t
-        else:
-            odelta_t = 1.0 / other
+        odelta_t = other.delta_t if isinstance(other, TimeSeries) else 1.0 / other
 
         if (odelta_t - self.delta_t) / self.delta_t > 1e-4:
             return False
 
-        if abs(1 - odelta_t / self.delta_t) * len(self) > 0.5:
-            return False
-
-        return True
+        return not abs(1 - odelta_t / self.delta_t) * len(self) > 0.5
 
     def _return(self, ary):
         return TimeSeries(ary, self._delta_t, epoch=self._epoch, copy=False)
@@ -350,6 +344,9 @@ class TimeSeries(Array):
         if super().__eq__(other):
             return self._epoch == other._epoch and self._delta_t == other._delta_t
         return False
+
+    # Defining __eq__ makes instances unhashable; make that explicit
+    __hash__ = None
 
     def almost_equal_elem(self, other, tol, relative=True, dtol=0.0):
         """
@@ -798,8 +795,7 @@ class TimeSeries(Array):
             # shift back to the original time
             fdata = data.to_frequencyseries()
             fdata = apply_fd_time_shift(fdata, -offset + fdata.epoch, copy=False)
-            tdata = fdata.to_timeseries()
-            return tdata
+            return fdata.to_timeseries()
         if method == "hard":
             tslice = data.time_slice(time - window, time + window)
             tslice[:] = 0
@@ -1232,10 +1228,7 @@ class TimeSeries(Array):
         if not self.sample_rate_close(other):
             raise ValueError("Sample rate must be the same")
         # determine if we want to inject in place or not
-        if copy:
-            ts = self.copy()
-        else:
-            ts = self
+        ts = self.copy() if copy else self
         # Other is disjoint
         if (other.start_time >= ts.end_time) or (ts.start_time > other.end_time):
             return ts
@@ -1366,8 +1359,7 @@ class TimeSeries(Array):
         from matplotlib import pyplot
 
         if self.kind == "real":
-            plot = pyplot.plot(self.sample_times, self, **kwds)
-            return plot
+            return pyplot.plot(self.sample_times, self, **kwds)
         if self.kind == "complex":
             plot1 = pyplot.plot(self.sample_times, self.real(), **kwds)
             plot2 = pyplot.plot(self.sample_times, self.imag(), **kwds)
@@ -1409,7 +1401,7 @@ class TimeSeries(Array):
         ends_time = self.start_time + ends * self.delta_t
 
         # Convert to segments
-        for s, e in zip(starts_time, ends_time):
+        for s, e in zip(starts_time, ends_time, strict=True):
             segs.append(segment(s, e))
 
         return segs.coalesce()
@@ -1458,10 +1450,9 @@ def load_timeseries(path, group=None):
         key = "data" if group is None else group
         with h5py.File(path, "r") as f:
             data = f[key][:]
-            series = TimeSeries(
+            return TimeSeries(
                 data, delta_t=f[key].attrs["delta_t"], epoch=f[key].attrs["start_time"]
             )
-        return series
     else:
         raise ValueError("Path must end with .npy, .hdf, or .txt")
 

@@ -234,10 +234,7 @@ class EpsieSampler(MultiTemperedSupport, BaseMCMC, BaseSampler):
         act = self.act
         if act is None:
             act = numpy.inf
-        if self.burn_in is None:
-            start_iter = 0
-        else:
-            start_iter = self.burn_in.burn_in_iteration
+        start_iter = 0 if self.burn_in is None else self.burn_in.burn_in_iteration
         nperchain = nsamples_in_chain(start_iter, act, self.niterations)
         if self.burn_in is not None:
             # ensure that any chain not burned in has zero samples
@@ -472,7 +469,7 @@ class EpsieSampler(MultiTemperedSupport, BaseMCMC, BaseSampler):
         # check that all of the sampling parameters have a specified
         # proposal
         sampling_params = set(model.sampling_params)
-        proposal_params = set(param for prop in proposals for param in prop.parameters)
+        proposal_params = {param for prop in proposals for param in prop.parameters}
         missing = sampling_params - proposal_params
         if missing:
             raise ValueError(

@@ -22,7 +22,6 @@ Workflow generator to create diagnosis plots and figures of merit for an input
 template bank.
 """
 
-# imports
 import argparse
 import os
 import shutil
@@ -90,7 +89,7 @@ class BanksimMatchCombineExecutable(wf.Executable):
     # This can be altered if you don't always want to store output files
     current_retention_level = wf.Executable.FINAL_RESULT
 
-    file_input_options = wf.Executable.file_input_options + ["--filter-func-file"]
+    file_input_options = [*wf.Executable.file_input_options, "--filter-func-file"]
 
     def create_node(
         self, analysis_time, match_files, inj_files, bank_files, extra_tags=None

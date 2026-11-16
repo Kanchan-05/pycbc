@@ -219,13 +219,13 @@ class TmpltbankTestClass(unittest.TestCase):
         evals_curr = Array(self.metric_params.evals[self.f_upper])
         evecs_curr = Array(self.metric_params.evecs[self.f_upper])
         # Uncomment these lines to regenerate the data files
-        # numpy.savetxt('newEvals.dat', evals_curr)
-        # numpy.savetxt('newEvecs.dat', evecs_curr)
+        # numpy.savetxt('newEvals.dat', evals_curr)  # noqa: ERA001
+        # numpy.savetxt('newEvecs.dat', evecs_curr)  # noqa: ERA001
         err_msg = "pycbc.tmpltbank.determine_eigen_directions has failed "
         err_msg += "sanity check."
         evals_diff = abs(evals_curr - evals_stock) / max_eval
         self.assertTrue(not (evals_diff > 1e-5).any(), msg=err_msg)
-        for stock, test in zip(evecs_stock.data, evecs_curr.data):
+        for stock, test in zip(evecs_stock.data, evecs_curr.data, strict=True):
             stock_scaled = stock * evals_curr.data**0.5
             test_scaled = test * evals_curr.data**0.5
             diff = stock_scaled - test_scaled
@@ -470,7 +470,7 @@ class TmpltbankTestClass(unittest.TestCase):
         with gzip.open(apy_fname) as apy_fp:
             stock_grid = numpy.loadtxt(apy_fp)
         # Uncomment this line to regenerate the data file
-        # numpy.savetxt("new_example.dat", arrz)
+        # numpy.savetxt("new_example.dat", arrz)  # noqa: ERA001
         err_msg = "Calculated lattice differs from that expected."
         self.assertTrue(len(arrz) == len(stock_grid), msg=err_msg)
         diff = arrz - stock_grid
@@ -615,7 +615,7 @@ class TmpltbankTestClass(unittest.TestCase):
     def test_point_distance(self):
         masses1 = [2, 2, 0.4, 0.6]
         masses2 = [2.02, 1.97, 0.41, 0.59]
-        dist, xis1, xis2 = pycbc.tmpltbank.get_point_distance(
+        dist, _, _ = pycbc.tmpltbank.get_point_distance(
             masses1, masses2, self.metric_params, self.f_upper
         )
         diff = abs((dist - 23.3681922039) / dist)

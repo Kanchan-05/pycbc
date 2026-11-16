@@ -21,6 +21,9 @@
 #
 # =============================================================================
 #
+# The commented-out lists in the test classes give the exact expressions
+# (fractions and powers) that the hard-coded expected values come from.
+# ruff: noqa: ERA001
 """
 This module contains a few helper functions designed to make writing PyCBC
 unit tests easier, while still allowing the tests to be run on CPU and CUDA
@@ -74,7 +77,7 @@ from pycbc.scheme import CPUScheme, CUDAScheme
 from pycbc.types import Array
 
 
-def _check_scheme_all(option, opt_str, scheme, parser):
+def _check_scheme_all(option, opt_str, scheme, parser):  # noqa: ARG001
     if scheme == "cuda" and not pycbc.HAVE_CUDA:
         raise optparse.OptionValueError("CUDA not found")
 
@@ -123,7 +126,7 @@ def parse_args_all_schemes(feature_str):
     return [_scheme, _context]
 
 
-def _check_scheme_cpu(option, opt_str, scheme, parser):
+def _check_scheme_cpu(option, opt_str, scheme, parser):  # noqa: ARG001
     if scheme == "cuda":
         exit(0)
 
@@ -203,10 +206,9 @@ def exit_based_on_results(results):
     not_imp_errors = 0
     for error in results.errors:
         for errormsg in error:
-            if type(errormsg) is str:
-                if "NotImplemented" in errormsg:
-                    not_imp_errors += 1
-                    break
+            if type(errormsg) is str and "NotImplemented" in errormsg:
+                not_imp_errors += 1
+                break
     if results.wasSuccessful():
         _exit(0)
     elif len(results.failures) == 0 and len(results.errors) == not_imp_errors:

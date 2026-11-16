@@ -188,9 +188,9 @@ class NessaiSampler(BaseSampler):
         # various types would be difficult. However, one may wish to revisit
         # this in future, e.g. if evaluating code is a concern.
         for d_out, d_defaults in zip(
-            [kwds, run_kwds], [default_kwds, default_run_kwds]
+            [kwds, run_kwds], [default_kwds, default_run_kwds], strict=True
         ):
-            for k in d_defaults.keys():
+            for k in d_defaults:
                 if cp.has_option(section, k):
                     option = cp.get(section, k)
                     try:

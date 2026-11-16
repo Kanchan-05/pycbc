@@ -238,16 +238,16 @@ class ArrayTestBase(ArrayBase, unittest.TestCase):
 
                 if out1.dtype == numpy.float32:
                     self.assertTrue(out1.precision == "single")
-                    # self.assertTrue(out1.kind == 'real')
+                    self.assertTrue(out1.kind == "real")
                 if out1.dtype == numpy.float64:
                     self.assertTrue(out1.precision == "double")
-                    # self.assertTrue(out1.kind == 'real')
+                    self.assertTrue(out1.kind == "real")
                 if out1.dtype == numpy.complex64:
                     self.assertTrue(out1.precision == "single")
-                    # self.assertTrue(out1.kind == 'complex')
+                    self.assertTrue(out1.kind == "complex")
                 if out1.dtype == numpy.complex128:
                     self.assertTrue(out1.precision == "double")
-                    # self.assertTrue(out1.kind == 'complex')
+                    self.assertTrue(out1.kind == "complex")
 
                 self.assertTrue(type(out2._scheme) == type(self.context))
                 self.assertTrue(type(out2._data) is SchemeArray)
@@ -385,16 +385,16 @@ class ArrayTestBase(ArrayBase, unittest.TestCase):
 
             if out1.dtype == numpy.float32:
                 self.assertTrue(out1.precision == "single")
-                # self.assertTrue(out1.kind == 'real')
+                self.assertTrue(out1.kind == "real")
             if out1.dtype == numpy.float64:
                 self.assertTrue(out1.precision == "double")
-                # self.assertTrue(out1.kind == 'real')
+                self.assertTrue(out1.kind == "real")
             if out1.dtype == numpy.complex64:
                 self.assertTrue(out1.precision == "single")
-                # self.assertTrue(out1.kind == 'complex')
+                self.assertTrue(out1.kind == "complex")
             if out1.dtype == numpy.complex128:
                 self.assertTrue(out1.precision == "double")
-                # self.assertTrue(out1.kind == 'complex')
+                self.assertTrue(out1.kind == "complex")
 
             if self.kind == "complex":
                 out2 = Array([5 + 0j, 3 + 0j, 1 + 0j], dtype=self.dtype)
@@ -456,9 +456,8 @@ class ArrayTestBase(ArrayBase, unittest.TestCase):
             self.assertRaises(TypeError, Array, [1, 2, 3], copy=False)
 
     def test_save(self):
-        with self.context:
-            # make temporary file paths
-            temp_file = tempfile.NamedTemporaryFile()
+        # make temporary file paths
+        with self.context, tempfile.NamedTemporaryFile() as temp_file:
             temp_path_npy = temp_file.name + ".npy"
             temp_path_txt = temp_file.name + ".txt"
             # make a test array
@@ -483,7 +482,7 @@ class ArrayTestBase(ArrayBase, unittest.TestCase):
 
     def test_multiply_and_add(self):
         with self.context:
-            if not self.kind == self.okind:
+            if self.kind != self.okind:
                 # Currently this is not supported
                 return
 

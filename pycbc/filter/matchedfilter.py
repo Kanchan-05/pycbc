@@ -52,9 +52,10 @@ BACKEND_PREFIX = "pycbc.filter.matchedfilter_"
 
 @pycbc.scheme.schemed(BACKEND_PREFIX)
 def correlate(x, y, z):
-    err_msg = "This function is a stub that should be overridden using the "
-    err_msg += "scheme. You shouldn't be seeing this error!"
-    raise ValueError(err_msg)
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 class BatchCorrelator:
@@ -88,9 +89,10 @@ class BatchCorrelator:
 
 @pycbc.scheme.schemed(BACKEND_PREFIX)
 def _correlate_factory(x, y, z):
-    err_msg = "This class is a stub that should be overridden using the "
-    err_msg += "scheme. You shouldn't be seeing this error!"
-    raise ValueError(err_msg)
+    raise NotImplementedError(
+        "This class is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 class Correlator:
@@ -383,7 +385,11 @@ class MatchedFilterControl:
         return snr, norm, corr, idx, snrv
 
     def full_matched_filter_thresh_only(
-        self, segnum, template_norm, window=None, epoch=None
+        self,
+        segnum,
+        template_norm,
+        window=None,  # noqa: ARG002
+        epoch=None,
     ):
         """
         Returns the complex snr timeseries, normalization of the complex snr,
@@ -1035,11 +1041,11 @@ class MatchedFilterSkyMaxControl:
 
         # The information on the complex side of this overlap is important
         # we may want to use this in the future.
-        if not id(hplus) == self.cached_hplus_hcross_hplus:
+        if id(hplus) != self.cached_hplus_hcross_hplus:
             self.cached_hplus_hcross_correlation = None
-        if not id(hcross) == self.cached_hplus_hcross_hcross:
+        if id(hcross) != self.cached_hplus_hcross_hcross:
             self.cached_hplus_hcross_correlation = None
-        if not id(psd) == self.cached_hplus_hcross_psd:
+        if id(psd) != self.cached_hplus_hcross_psd:
             self.cached_hplus_hcross_correlation = None
         if self.cached_hplus_hcross_correlation is None:
             hplus_cross_corr = overlap_cplx(
@@ -1249,10 +1255,7 @@ def sigmasq(htilde, psd=None, low_frequency_cutoff=None, high_frequency_cutoff=N
         except AssertionError:
             raise ValueError("Waveform does not have same delta_f as psd")
 
-    if psd is None:
-        sq = ht.inner(ht)
-    else:
-        sq = ht.weighted_inner(ht, psd[kmin:kmax])
+    sq = ht.inner(ht) if psd is None else ht.weighted_inner(ht, psd[kmin:kmax])
 
     return sq.real * norm
 
@@ -1805,7 +1808,9 @@ class LiveBatchMatchedFilter:
 
         chunks = numpy.array([])
         num = 0
-        for count, grab in zip(counts, grabs):
+        # counts is per unique duration and grabs per unique sample length, so
+        # these need not be the same length
+        for count, grab in zip(counts, grabs, strict=False):
             chunks = numpy.append(chunks, numpy.arange(num, count + num, grab))
             chunks = numpy.append(chunks, [count + num])
             num += count
@@ -1822,8 +1827,8 @@ class LiveBatchMatchedFilter:
         samples = self.chunk_tsamples * self.chunks
 
         # Create workspace memory for correlate and snr
-        mem_ids = [(a, b) for a, b in zip(chunk_durations, self.chunks)]
-        mem_types = set(zip(mem_ids, samples))
+        mem_ids = [(a, b) for a, b in zip(chunk_durations, self.chunks, strict=True)]
+        mem_types = set(zip(mem_ids, samples, strict=True))
 
         # Groups are processed strictly one at a time, so we use one pair
         # of memory buffers for both, sized for the largest and using views
@@ -1906,8 +1911,7 @@ class LiveBatchMatchedFilter:
             tmp = veto_info
             veto_info = [tmp[i] for i in sort]
 
-        result = self._process_vetoes(result, veto_info)
-        return result
+        return self._process_vetoes(result, veto_info)
 
     def _process_vetoes(self, results, veto_info):
         """Calculate signal based vetoes"""
@@ -1992,9 +1996,8 @@ class LiveBatchMatchedFilter:
         # Find the peaks in our SNR times series from the various templates
         i = 0
         for htilde in tgroup:
-            if hasattr(htilde, "time_offset"):
-                if "time_offset" not in result:
-                    result["time_offset"] = []
+            if hasattr(htilde, "time_offset") and "time_offset" not in result:
+                result["time_offset"] = []
 
             l = htilde.out[seg].abs_arg_max()
 
@@ -2297,14 +2300,14 @@ def compute_followup_snr_series(
         state_start_time = trig_time - duration / 2 - htilde.length_in_time
         state_end_time = trig_time + duration / 2
         state_duration = state_end_time - state_start_time
-        if data_reader.state is not None:
+        if data_reader.state is not None:  # noqa: SIM102
             if not data_reader.state.is_extent_valid(state_start_time, state_duration):
                 return None
 
         # was the data quality ok for the full amount of involved data?
         dq_start_time = state_start_time - data_reader.dq_padding
         dq_duration = state_duration + 2 * data_reader.dq_padding
-        if data_reader.dq is not None:
+        if data_reader.dq is not None:  # noqa: SIM102
             if not data_reader.dq.is_extent_valid(dq_start_time, dq_duration):
                 return None
 
@@ -2420,10 +2423,7 @@ def optimized_match(
     waveform_2 = waveform_2[mask]
     frequencies = frequencies[mask]
 
-    if psd is not None:
-        psd_arr = psd.numpy()[mask]
-    else:
-        psd_arr = numpy.ones_like(waveform_1)
+    psd_arr = psd.numpy()[mask] if psd is not None else numpy.ones_like(waveform_1)
 
     def product(a, b):
         integral = numpy.sum(numpy.conj(a) * b / psd_arr) * delta_f

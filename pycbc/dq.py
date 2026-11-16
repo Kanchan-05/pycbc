@@ -139,7 +139,7 @@ def query_flag(
     start_time,
     end_time,
     source="any",
-    server="https://segments.ligo.org",
+    server="https://segments.igwn.org",
     veto_definer=None,
     cache=False,
 ):
@@ -201,7 +201,8 @@ def query_flag(
                 int(duration),
             )
             fname = get_file(url, cache=cache, timeout=10)
-            data = json.load(open(fname))
+            with open(fname) as fp:
+                data = json.load(fp)
             if "segments" in data:
                 flag_segments = data["segments"]
 
@@ -275,7 +276,7 @@ def query_cumulative_flags(
     start_time,
     end_time,
     source="any",
-    server="https://segments.ligo.org",
+    server="https://segments.igwn.org",
     veto_definer=None,
     bounds=None,
     padding=None,
@@ -436,7 +437,7 @@ def query_str(
     start_time,
     end_time,
     source="any",
-    server="https://segments.ligo.org",
+    server="https://segments.igwn.org",
     veto_definer=None,
     cache=False,
 ):
@@ -509,5 +510,4 @@ def query_str(
         cache=cache,
     )
 
-    segs = (segs - mseg).coalesce()
-    return segs
+    return (segs - mseg).coalesce()

@@ -26,6 +26,7 @@ __version__ = "0.0"
 __date__ = "31.10.2017"
 
 import argparse
+import logging
 
 import numpy as np
 import scipy.stats as ss
@@ -37,6 +38,8 @@ import pycbc
 import pycbc.version
 from pycbc.io.hdf import HFile
 from pycbc.population import rates_functions as rf
+
+logger = logging.getLogger(__name__)
 
 # Parse command line
 parser = argparse.ArgumentParser(description=__doc__)
@@ -83,7 +86,9 @@ assert len(opts.posterior_samples) == len(opts.population_models), (
 
 # Save rate posteriors in one file
 with HFile(opts.rate_file, "w") as out:
-    for fname, model in zip(opts.posterior_samples, opts.population_models):
+    for fname, model in zip(
+        opts.posterior_samples, opts.population_models, strict=True
+    ):
         f = HFile(fname, "r")
         Rf = f[model + "/Rf"][:]
         Lf = f[model + "/Lf"][:]
@@ -98,7 +103,9 @@ with HFile(opts.rate_file, "w") as out:
 p_astro = []
 plt.figure()
 color = iter(cm.rainbow(np.linspace(0, 1, len(opts.population_models))))
-mods = zip(opts.posterior_samples, opts.population_models, opts.plot_labels)
+mods = zip(
+    opts.posterior_samples, opts.population_models, opts.plot_labels, strict=True
+)
 
 f = HFile(opts.prior_samples, "r")
 for fpost, model, lbl in mods:
@@ -149,7 +156,7 @@ plt.savefig(opts.rates_figure)
 
 plt.figure()
 color = iter(cm.rainbow(np.linspace(0, 1, len(opts.population_models))))
-for pas, lbl in zip(p_astro, opts.plot_labels):
+for pas, lbl in zip(p_astro, opts.plot_labels, strict=True):
     c = next(color)
     plt.plot(log_fg_ratios, 1 - pas, ".", label=lbl, color=c)
 
@@ -158,4 +165,4 @@ plt.ylabel(r"$1-p_\mathrm{astro}$")
 plt.legend(loc="best")
 plt.yscale("log")
 plt.savefig(opts.pastro_figure)
-print(p_astro)
+logger.info("p_astro: %s", p_astro)

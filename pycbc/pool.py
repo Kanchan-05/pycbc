@@ -195,8 +195,7 @@ def use_mpi(require_mpi=False, log=True):
                 logger.info("Running under mpi with size: %s, rank: %s", size, rank)
     except ImportError as e:
         if require_mpi:
-            print(e)
-            raise ValueError("Failed to load mpi, ensure mpi4py is installed")
+            raise ValueError("Failed to load mpi, ensure mpi4py is installed") from e
     if not use_mpi:
         size = rank = 0
     return use_mpi, size, rank
@@ -208,7 +207,7 @@ def choose_pool(processes, mpi=False, **kwargs):
 
     Keyword arguments are passed to the pool constructor.
     """
-    do_mpi, size, rank = use_mpi(require_mpi=mpi)
+    do_mpi, size, _ = use_mpi(require_mpi=mpi)
     if do_mpi:
         try:
             import schwimmbad

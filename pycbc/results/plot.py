@@ -8,10 +8,7 @@ def hist_overflow(val, val_max, **kwds):
     overflow = len(val[val >= val_max])
     plt.hist(val[val < val_max], **kwds)
 
-    if "color" in kwds:
-        color = kwds["color"]
-    else:
-        color = None
+    color = kwds.get("color")
 
     if overflow > 0:
         rect = plt.bar(val_max + 0.05, overflow, 0.5, color=color)[0]
@@ -36,7 +33,7 @@ def add_style_opt_to_parser(parser, default=None):
     parser.add_argument(
         "--mpl-style",
         default=default,
-        choices=["default"] + pyplot.style.available + ["xkcd"],
+        choices=["default", *pyplot.style.available, "xkcd"],
         help="Set the matplotlib style to use.",
     )
 

@@ -613,11 +613,8 @@ class BaseGatedGaussian(BaseGaussianNoise):
 
         """
         gate_idx_len = int(rindex - lindex)
-        if gate_idx_len not in self._cond.keys():
-            conds = {}
-        else:
-            conds = self._cond[gate_idx_len]
-        if det not in conds.keys():
+        conds = self._cond.get(gate_idx_len, {})
+        if det not in conds:
             # construct the matrix
             invpsd = self._invpsds[det]
             tdfilter = invpsd.astype("complex").to_timeseries() * invpsd.delta_t
@@ -705,8 +702,7 @@ class BaseGatedGaussian(BaseGaussianNoise):
                     "Setting low frequency cutoff of %s PSD to %s", d, lfs / 2.0
                 )
                 opts.psd_low_frequency_cutoff[d] = lfs / 2.0
-        out = fd_data_from_strain_dict(opts, strain_dict, psd_strain_dict)
-        return out
+        return fd_data_from_strain_dict(opts, strain_dict, psd_strain_dict)
 
     def write_metadata(self, fp, group=None):
         """
@@ -896,7 +892,7 @@ class GatedGaussianNoise(BaseGatedGaussian):
         """Calculate a multi-model (signal) likelihood"""
         # Generate the waveforms for each submodel
         wfs = []
-        for m in models + [self]:
+        for m in [*models, self]:
             wf = m.get_waveforms()
             wfs.append(wf)
 
@@ -1193,7 +1189,7 @@ class GatedGaussianMargPol(BaseGatedGaussian):
         """Calculate a multi-model (signal) likelihood"""
         # Generate the waveforms for each submodel
         wfs = []
-        for m in models + [self]:
+        for m in [*models, self]:
             wf = m.get_waveforms()
             wfs.append(wf)
 
@@ -1431,10 +1427,7 @@ class GatedGaussianMargPhase(BaseGatedGaussian):
         self._current_stats.maxl_phase = self.phases[maxlidx]
         self._current_stats.maxl_logl = loglr[maxlidx] + lognl + norm
         # get the marginalized log likelihood ratio
-        marglogl = (
-            special.logsumexp(loglr) + lognl + norm - numpy.log(self.phase_samples)
-        )
-        return marglogl
+        return special.logsumexp(loglr) + lognl + norm - numpy.log(self.phase_samples)
 
     @property
     def multi_signal_support(self):
@@ -1449,7 +1442,7 @@ class GatedGaussianMargPhase(BaseGatedGaussian):
         """Calculate a multi-model (signal) likelihood"""
         # Generate the waveforms for each submodel
         wfs = []
-        for m in models + [self]:
+        for m in [*models, self]:
             wf = m.get_waveforms()
             wfs.append(wf)
         # combine into a single waveform
@@ -1582,13 +1575,12 @@ class GatedGaussianMultimodeMargPhase(BaseGatedGaussian):
         # specify whether one of the modes is a reference to all other modes;
         # it is assumed that only one mode is given to be the reference
         self.ref_mode = ref_mode
-        if self.ref_mode:
-            if len(self.amp_names) > 1:
-                raise ValueError(
-                    "More than one mode is specified for SNR "
-                    "sampling. This model only supports one mode "
-                    "sampled in SNR if ref_amp is turned on."
-                )
+        if self.ref_mode and len(self.amp_names) > 1:
+            raise ValueError(
+                "More than one mode is specified for SNR "
+                "sampling. This model only supports one mode "
+                "sampled in SNR if ref_amp is turned on."
+            )
 
         # create the waveform generator
         self.waveform_generator = create_waveform_generator(
@@ -1824,10 +1816,7 @@ class GatedGaussianMultimodeMargPhase(BaseGatedGaussian):
         self._current_stats.maxl_phase = self.phases[maxlidx]
         self._current_stats.maxl_logl = loglr[maxlidx] + lognl + norm
         # get the marginalized log likelihood ratio
-        marglogl = (
-            special.logsumexp(loglr) + lognl + norm - numpy.log(self.phase_samples)
-        )
-        return marglogl
+        return special.logsumexp(loglr) + lognl + norm - numpy.log(self.phase_samples)
 
     def _nowaveform_handler(self):
         """Sets the extra stats to nan if no waveform was generated."""
@@ -1850,12 +1839,12 @@ class GatedGaussianMultimodeMargPhase(BaseGatedGaussian):
     def multi_loglikelihood(self, models):
         """Calculate a multi-model (signal) likelihood"""
         # Generate the waveforms for each submodel
-        if any(m.sample_snrs for m in models + [self]):
+        if any(m.sample_snrs for m in [*models, self]):
             raise NotImplementedError(
                 "multi-signal likelihoods are not supported when sampling SNRs"
             )
         wfs = []
-        for m in models + [self]:
+        for m in [*models, self]:
             wf = m.get_waveforms()
             wfs.append(wf)
         # combine into a single waveform

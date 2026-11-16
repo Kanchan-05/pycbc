@@ -58,20 +58,18 @@ def labels_in_files_metadata(labels, rundir, file_paths):
     # Sort the file paths according to labels
     up_labels = [l.upper() for l in labels]
     sorted_file_paths = [
-        list(filter(lambda x: l in x.upper(), file_paths))[0] for l in up_labels
+        next(filter(lambda x: l in x.upper(), file_paths)) for l in up_labels
     ]
 
     # Convert sorted_file_paths to a FileList where each File has its label
     # in the tags
-    labels_paths = zip(up_labels, sorted_file_paths)
-    out = _workflow.FileList(
+    labels_paths = zip(up_labels, sorted_file_paths, strict=True)
+    return _workflow.FileList(
         [
             _workflow.resolve_url_to_file(os.path.join(rundir, p), attrs={"tags": [l]})
             for (l, p) in labels_paths
         ]
     )
-
-    return out
 
 
 # Function to retrieve the segments plot (produced in the preprocessing stage)
@@ -196,8 +194,8 @@ _workflow.makedir(rdir.base)
 _workflow.makedir(rdir["workflow"])
 
 # File instances of all input trigger files
-# Expected structure of args.trig_files:
-# [ALL_TIMES, ONSOURCE, OFFSOURCE, OFFTRIAL_1, ..., OFFTRIAL_N]
+# Expected structure of args.trig_files: ALL_TIMES, ONSOURCE, OFFSOURCE,
+# then OFFTRIAL_1 to OFFTRIAL_N
 trig_files = [
     _workflow.resolve_url_to_file(os.path.join(start_rundir, trig_file))
     for trig_file in args.trig_files
@@ -264,9 +262,6 @@ logger.info("Created log file %s", wf_log_file.storage_path)
 
 # TODO: Pick up inifile, segments plot, GRB time and location, and
 #       report IFO responses
-# Read the configuration file
-# typecast str from command line to File instances
-# cp = configuration.WorkflowConfigParser(opts.pp_config_file)
 
 out_dir = rdir.base
 _workflow.makedir(out_dir)
@@ -286,7 +281,11 @@ plot_node, skygrid_plot = _workflow.make_pygrb_plot(
 plotting_nodes.append(plot_node)
 # Plot the template bank
 plot_node, bank_plot = _workflow.make_pygrb_plot(
-    wflow, "pycbc_plot_bank_corner", out_dir, bank_file=bank_file
+    wflow,
+    "pycbc_plot_bank_corner",
+    out_dir,
+    bank_file=bank_file,
+    tags=["bank"]
 )
 plotting_nodes.append(plot_node)
 # Retrieve the segments plot (produced in the preprocessing stage)
@@ -328,11 +327,11 @@ for snr_type in timeseries:
     for ifo in ifos_to_loop:
         timeseries_plots = _workflow.FileList([])
         # Plots without and with injections
-        for inj_file in set([None, tuning_inj_file]):
+        for inj_file in {None, tuning_inj_file}:
             # If the tuning injection file is used for the plot, include its
             # tags in assembling the plot name
             inj_tags = inj_file.tags if inj_file else []
-            tags = [snr_type] + inj_tags
+            tags = [snr_type, *inj_tags]
             plot_node, output_files = _workflow.make_pygrb_plot(
                 wflow,
                 "pygrb_plot_snr_timeseries",
@@ -368,11 +367,11 @@ for veto in vetoes:
     ifo_loop = [ifos[0]] if veto == "network" else ifos
     for ifo in ifo_loop:
         # Plot with and without injections
-        for inj_file in set([tuning_inj_file, None]):
+        for inj_file in {tuning_inj_file, None}:
             # If the tuning injection file is used for the plot, include its
             # tags in assembling the plot name
             inj_tags = inj_file.tags if inj_file else []
-            tags = [veto] + inj_tags
+            tags = [veto, *inj_tags]
             ifo_arg = None if veto == "network" else ifo
             plot_node, output_files = _workflow.make_pygrb_plot(
                 wflow,
@@ -401,7 +400,7 @@ files = _workflow.FileList([])
 if wflow.cp.has_section("pygrb_plot_coh_ifosnr"):
     for ifo in ifos:
         # Plots with and without injections
-        for inj_file in set([tuning_inj_file, None]):
+        for inj_file in {tuning_inj_file, None}:
             sngl_snr_plots = _workflow.FileList([])
             for zoom_tag in [["zoomin"], []]:
                 # If the tuning injection file is used for the plot, include
@@ -443,7 +442,7 @@ coinc_files = _workflow.FileList([])
 nstats = wflow.cp.get_subsections("pygrb_plot_null_stats")
 for nstat in nstats:
     # Plots with and without injections, zoomed in and zoomed out
-    for inj_file in set([tuning_inj_file, None]):
+    for inj_file in {tuning_inj_file, None}:
         if nstat == "coincident":
             out_dir = coinc_out_dir
             files = coinc_files
@@ -455,7 +454,7 @@ for nstat in nstats:
             # If the tuning injection file is used for the plot, include its
             # tags in assembling the plot name
             inj_tags = inj_file.tags if inj_file else []
-            tags = [nstat] + zoom_tag + inj_tags
+            tags = [nstat, *zoom_tag, *inj_tags]
             plot_node, output_files = _workflow.make_pygrb_plot(
                 wflow,
                 "pygrb_plot_null_stats",
@@ -535,7 +534,7 @@ for inj_set in inj_sets:
                 plotting_nodes.append(plot_node)
                 # A File is needed, not a 1-element list with a File
                 # pycbc_pygrb_plot_injs_results produces only one plot, so
-                # take [0]
+                # take the first one
                 files.append(output_files[0])
     # Generate quiet-found and missed-found html tables
     html_node, [mf_table, qf_table, qf_h5] = _workflow.make_pygrb_injs_tables(
@@ -550,7 +549,7 @@ for inj_set in inj_sets:
     )
     html_nodes.append(html_node)
 
-    inj_layout = list(layout.grouper(files, 2)) + [(mf_table,), (qf_table,)]
+    inj_layout = [*list(layout.grouper(files, 2)), (mf_table,), (qf_table,)]
     layout.two_column_layout(out_dir, inj_layout)
 
     # Follow up of loudest N quiet/missed-found injections:
@@ -570,7 +569,7 @@ for inj_set in inj_sets:
             out_dir,
             seg_files=seg_files,
             veto_file=veto_file,
-            tags=inj_file.tags + ["loudest_quiet_found_injs"],
+            tags=[*inj_file.tags, "loudest_quiet_found_injs"],
         )
         mfu_nodes.append(mfu_node)
         logger.info("Leaving minifollowups")
@@ -605,7 +604,7 @@ html_node, [lofft_table, lofft_h5] = _workflow.make_pygrb_injs_tables(
 )
 html_nodes.append(html_node)
 
-lofft_layout = list(layout.grouper(files, 2)) + [(lofft_table,)]
+lofft_layout = [*list(layout.grouper(files, 2)), (lofft_table,)]
 layout.two_column_layout(out_dir, lofft_layout)
 
 # Follow up N loudest offsource triggers (parent-child)
@@ -647,7 +646,7 @@ bkgd_plots = []
 for inj_set in inj_sets:
     # Retrieve the injections result File for the inj_set label
     inj_file = inj_files.find_output_with_tag(inj_set, fail_if_not_single_file=True)
-    tags = [offtrials[0]] + inj_file.tags
+    tags = [offtrials[0], *inj_file.tags]
     plot_node, output_files = _workflow.make_pygrb_plot(
         wflow,
         "pygrb_efficiency",
@@ -673,7 +672,7 @@ for i, offtrial in enumerate(offtrials):
     for inj_set in inj_sets:
         # Retrieve the injections result File for the inj_set label
         inj_file = inj_files.find_output_with_tag(inj_set, fail_if_not_single_file=True)
-        tags = [offtrial] + inj_file.tags
+        tags = [offtrial, *inj_file.tags]
         plot_node, output_files = _workflow.make_pygrb_plot(
             wflow,
             "pygrb_efficiency",
@@ -788,7 +787,7 @@ for snr_type in ["reweighted", "coherent"]:
     )
     plotting_nodes.append(plot_node)
     timeseries_plots.extend(output_files)
-openbox_layout = [(lont_table,)] + list(layout.grouper(timeseries_plots, 2))
+openbox_layout = [(lont_table,), *list(layout.grouper(timeseries_plots, 2))]
 layout.two_column_layout(out_dir, openbox_layout)
 
 # Loudest on-source trigger follow up
@@ -818,7 +817,7 @@ eff_layout = []
 for inj_set in inj_sets:
     # Retrieve the injections result File corresponding to the inj_set label
     inj_file = inj_files.find_output_with_tag(inj_set, fail_if_not_single_file=True)
-    tags = ["onsource"] + inj_file.tags
+    tags = ["onsource", *inj_file.tags]
     plot_node, output_files = _workflow.make_pygrb_plot(
         wflow,
         "pygrb_efficiency",

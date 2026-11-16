@@ -151,16 +151,12 @@ def redshift_estimation(distance, distance_std, lal_cosmology):
     https://git.ligo.org/lscsoft/pesummary/-/blob/master/pesummary/gw/
     cosmology.py.
     """
-    if lal_cosmology:
-        cosmology = FlatLambdaCDM(H0=67.90, Om0=0.3065)
-    else:
-        cosmology = None
+    cosmology = FlatLambdaCDM(H0=67.9, Om0=0.3065) if lal_cosmology else None
     z_estimation = _redshift(distance, cosmology=cosmology)
     z_est_max = _redshift((distance + distance_std), cosmology=cosmology)
     z_est_min = _redshift((distance - distance_std), cosmology=cosmology)
     z_std_estimation = 0.5 * (z_est_max - z_est_min)
-    z = {"central": z_estimation, "delta": z_std_estimation}
-    return z
+    return {"central": z_estimation, "delta": z_std_estimation}
 
 
 def src_mass_from_z_det_mass(z, del_z, mdet, del_mdet):
@@ -216,11 +212,11 @@ def get_area(trig_mc, lim_h1, lim_h2, lim_v1, lim_v2):
     else:
         max_h1 = m2mcm1(mc_max, lim_h1)
         min_h1 = m2mcm1(mc_min, lim_h1)
-        fun_sup = lambda x: lim_h1
+        fun_sup = lambda x: lim_h1  # noqa: ARG005
 
     max_h2 = m2mcm1(mc_max, lim_h2)
     min_h2 = m2mcm1(mc_min, lim_h2)
-    fun_inf = lambda x: lim_h2
+    fun_inf = lambda x: lim_h2  # noqa: ARG005
 
     lim_max1 = np.clip(max_h1, lim_v1, lim_v2)
     lim_max2 = np.clip(max_h2, lim_v1, lim_v2)
@@ -231,8 +227,7 @@ def get_area(trig_mc, lim_h1, lim_h2, lim_v1, lim_v2):
     int_min = intmc(mc_min, lim_min1, lim_min2)
     intline_sup = quad(fun_sup, lim_min1, lim_max1)[0]
     intline_inf = quad(fun_inf, lim_min2, lim_max2)[0]
-    area = int_max + intline_sup - int_min - intline_inf
-    return area
+    return int_max + intline_sup - int_min - intline_inf
 
 
 def calc_areas(trig_mc_det, mass_limits, mass_bdary, z, mass_gap, mass_gap_separate):

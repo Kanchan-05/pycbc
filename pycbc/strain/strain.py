@@ -202,9 +202,7 @@ def detect_loud_glitches(
     cluster_idx = pycbc.events.findchirp_cluster_over_window(
         indices, numpy.array(mag[indices]), int(cluster_window * strain.sample_rate)
     )
-    times = [idx * strain.delta_t + strain.start_time for idx in indices[cluster_idx]]
-
-    return times
+    return [idx * strain.delta_t + strain.start_time for idx in indices[cluster_idx]]
 
 
 def from_cli(opt, dyn_range_fac=1, precision="single", inj_filter_rejector=None):
@@ -644,7 +642,7 @@ def insert_strain_option_group(parser, gps_times=True):
     data_reading_group.add_argument(
         "--fake-strain",
         help="Name of model PSD for generating fake gaussian noise.",
-        choices=pycbc.psd.get_psd_model_list() + ["zeroNoise"],
+        choices=[*pycbc.psd.get_psd_model_list(), "zeroNoise"],
     )
     data_reading_group.add_argument(
         "--fake-strain-extra-args",
@@ -1417,6 +1415,8 @@ class StrainSegments:
     conditioning.
     """
 
+    # injection_window is unused, but kept so that existing calls keep working
+    # (the injection window is applied by EventManager)
     def __init__(
         self,
         strain,
@@ -1426,7 +1426,7 @@ class StrainSegments:
         trigger_start=None,
         trigger_end=None,
         filter_inj_only=False,
-        injection_window=None,
+        injection_window=None,  # noqa: ARG002
         allow_zero_padding=False,
     ):
         """
@@ -1439,10 +1439,7 @@ class StrainSegments:
         self.delta_t = strain.delta_t
         self.sample_rate = strain.sample_rate
 
-        if segment_length:
-            seg_len = segment_length
-        else:
-            seg_len = strain.duration
+        seg_len = segment_length or strain.duration
 
         self.delta_f = 1.0 / seg_len
         self.time_len = int(seg_len * self.sample_rate)
@@ -1543,7 +1540,7 @@ class StrainSegments:
                 for time in end_times
             ]
 
-        for seg, ana in zip(self.segment_slices, self.analyze_slices):
+        for seg, ana in zip(self.segment_slices, self.analyze_slices, strict=True):
             start = ana.start
             stop = ana.stop
             cum_start = start + seg.start
@@ -1587,7 +1584,9 @@ class StrainSegments:
         """
         if not self._fourier_segments:
             self._fourier_segments = []
-            for seg_slice, ana in zip(self.segment_slices, self.analyze_slices):
+            for seg_slice, ana in zip(
+                self.segment_slices, self.analyze_slices, strict=True
+            ):
                 if seg_slice.start >= 0 and seg_slice.stop <= len(self.strain):
                     freq_seg = make_frequency_series(self.strain[seg_slice])
                 # Assume that we cannot have a case where we both zero-pad on
@@ -1796,9 +1795,14 @@ class StrainSegments:
             required_opts_multi_ifo(opt, parser, ifo, cls.required_opts_list)
 
 
+# uid is only part of the lru_cache key
 @functools.lru_cache(maxsize=500)
 def create_memory_and_engine_for_class_based_fft(
-    npoints_time, dtype, delta_t=1, ifft=False, uid=0
+    npoints_time,
+    dtype,
+    delta_t=1,
+    ifft=False,
+    uid=0,  # noqa: ARG001
 ):
     """
     Create memory and engine for class-based FFT/IFFT
@@ -1876,10 +1880,7 @@ def execute_cached_fft(
     """
     from pycbc.types import real_same_precision_as
 
-    if ifft:
-        npoints_time = (len(invec_data) - 1) * 2
-    else:
-        npoints_time = len(invec_data)
+    npoints_time = (len(invec_data) - 1) * 2 if ifft else len(invec_data)
 
     try:
         delta_t = invec_data.delta_t
@@ -2111,11 +2112,11 @@ class StrainBuffer(pycbc.frame.DataBuffer):
 
         # low latency dq channel
         if data_quality_channel is not None:
-            sb_kwargs = dict(
-                max_buffer=max_buffer,
-                force_update_cache=force_update_cache,
-                increment_update_cache=increment_update_cache,
-            )
+            sb_kwargs = {
+                "max_buffer": max_buffer,
+                "force_update_cache": force_update_cache,
+                "increment_update_cache": increment_update_cache,
+            }
             if (
                 len(self.data_quality_flags) == 1
                 and self.data_quality_flags[0] == "veto_nonzero"
@@ -2262,7 +2263,7 @@ class StrainBuffer(pycbc.frame.DataBuffer):
         )
 
         # If the new psd is similar to the old one, don't replace it
-        if self.psd and self.psd_recalculate_difference:
+        if self.psd and self.psd_recalculate_difference:  # noqa: SIM102
             if (
                 abs(self.psd.dist - psd.dist) / self.psd.dist
                 < self.psd_recalculate_difference
@@ -2276,7 +2277,7 @@ class StrainBuffer(pycbc.frame.DataBuffer):
                 return True
 
         # If the new psd is *really* different than the old one, return an error
-        if self.psd and self.psd_abort_difference:
+        if self.psd and self.psd_abort_difference:  # noqa: SIM102
             if (
                 abs(self.psd.dist - psd.dist) / self.psd.dist
                 > self.psd_abort_difference
@@ -2400,8 +2401,7 @@ class StrainBuffer(pycbc.frame.DataBuffer):
             fseries_trimmed.psd = psd
             self.segments[delta_f] = fseries_trimmed
 
-        stilde = self.segments[delta_f]
-        return stilde
+        return self.segments[delta_f]
 
     def near_hwinj(self):
         """
@@ -2411,11 +2411,9 @@ class StrainBuffer(pycbc.frame.DataBuffer):
         if not self.state:
             return False
 
-        if not self.state.is_extent_valid(
+        return not self.state.is_extent_valid(
             self.start_time, self.blocksize, pycbc.frame.NO_HWINJ
-        ):
-            return True
-        return False
+        )
 
     def null_advance_strain(self, blocksize):
         """

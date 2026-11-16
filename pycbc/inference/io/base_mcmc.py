@@ -188,7 +188,7 @@ class CommonMCMCMetadataIO:
             group = self.samples_group
         if parameter is None:
             try:
-                parameter = list(self[group].keys())[0]
+                parameter = list(self[group].keys())[0]  # noqa: RUF015
             except (IndexError, KeyError):
                 # nothing has been written yet, just return 0
                 return 0
@@ -387,7 +387,7 @@ class CommonMCMCMetadataIO:
             # no acts were calculate
             act = None
         if act is not None:
-            act = act.reshape(tuple(list(act.shape) + [1]))
+            act = act.reshape((*list(act.shape), 1))
             self.write_data("act", act, path=path, append=True)
         # write the burn in iteration in the same way
         try:
@@ -396,7 +396,7 @@ class CommonMCMCMetadataIO:
             # no burn in tests were done
             burn_in = None
         if burn_in is not None:
-            burn_in = burn_in.reshape(tuple(list(burn_in.shape) + [1]))
+            burn_in = burn_in.reshape((*list(burn_in.shape), 1))
             self.write_data("burn_in_iteration", burn_in, path=path, append=True)
 
     @staticmethod
@@ -574,11 +574,7 @@ class EnsembleMCMCMetadataIO:
             acl = self.acl
         except ValueError:
             acl = 1
-        if numpy.isfinite(acl):
-            acl = int(numpy.ceil(acl))
-        else:
-            acl = 1
-        return acl
+        return int(numpy.ceil(acl)) if numpy.isfinite(acl) else 1
 
 
 def write_samples(
@@ -629,7 +625,7 @@ def write_samples(
         something other than inference samples!**
 
     """
-    nwalkers, nsamples = list(samples.values())[0].shape
+    nwalkers, nsamples = next(iter(samples.values())).shape
     assert all(p.shape == (nwalkers, nsamples) for p in samples.values()), (
         "all samples must have the same shape"
     )
@@ -734,11 +730,8 @@ def ensemble_read_raw_samples(
     for name in fields:
         arr = fp[group.format(name=name)][widx, get_index]
         niterations = arr.shape[-1] if iteration is None else 1
-        if flatten:
-            arr = arr.flatten()
-        else:
-            # ensure that the returned array is 2D
-            arr = arr.reshape((nwalkers, niterations))
+        # if not flattening, ensure that the returned array is 2D
+        arr = arr.flatten() if flatten else arr.reshape((nwalkers, niterations))
         arrays[name] = arr
     return arrays
 
@@ -1025,9 +1018,9 @@ def nsamples_in_chain(start_iter, interval, niterations):
     # this is written in a slightly wonky way so that it will work with either
     # python scalars or numpy arrays; it is equivalent to:
     #    if start_iter < 0:
-    #        count = min(abs(start_iter), niterations)
-    #    else:
-    #        count = max(niterations - start_iter, 0)
+    #        count = min(abs(start_iter), niterations)  # noqa: ERA001
+    #    else:  # noqa: ERA001
+    #        count = max(niterations - start_iter, 0)  # noqa: ERA001
     slt0 = start_iter < 0
     sgt0 = start_iter >= 0
     count = slt0 * abs(start_iter) + sgt0 * (niterations - start_iter)

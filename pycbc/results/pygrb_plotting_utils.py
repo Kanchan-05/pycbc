@@ -100,7 +100,7 @@ def make_grb_segments_plot(
     ifo_colors = {}
     for ifo in ifos:
         ifo_colors[ifo] = ifo_color(ifo)
-        if ifo not in science_segs.keys():
+        if ifo not in science_segs:
             science_segs[ifo] = segments.segmentlist([])
 
     # Make plot
@@ -108,7 +108,7 @@ def make_grb_segments_plot(
     if len(ifos) == 1:
         subs = [subs]
     plt.xticks(rotation=20, ha="right")
-    for sub, ifo in zip(subs, ifos):
+    for sub, ifo in zip(subs, ifos, strict=True):
         for seg in science_segs[ifo]:
             sub.add_patch(
                 Rectangle(
@@ -151,10 +151,7 @@ def make_grb_segments_plot(
         else:
             sub.plot([trigger_time, trigger_time], [0, 1], ":k")
         if fail_criterion:
-            if len(science_segs[ifo]) > 0:
-                style_str = "--"
-            else:
-                style_str = "-"
+            style_str = "--" if len(science_segs[ifo]) > 0 else "-"
             sub.plot(
                 [fail_criterion[0], fail_criterion[0]],
                 [0, 1],
@@ -265,7 +262,7 @@ def pygrb_plotter(
         polyx = numpy.append(polyx, [max(snr_vals), min(snr_vals)])
         polyy = numpy.append(polyy, [limy, limy])
         cax.fill(polyx, polyy, color="#dddddd")
-    # Axes: labels and limits
+    # Axes labels and limits
     cax.set_xlabel(xlabel)
     cax.set_ylabel(ylabel)
     if opts.x_lims:

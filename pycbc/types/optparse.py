@@ -35,13 +35,10 @@ class DictWithDefaultReturn(defaultdict):
         if self.items() and not all(entry is None for entry in self.values()):
             # True if any values are explictly set.
             return True
-        if self["RANDOM_STRING_314324"] is not None:
-            # Or true if the default value was set
-            # NOTE: This stores the string RANDOM_STRING_314324 in the dict
-            # so subsequent calls will be caught in the first test here.
-            return True
-        # Else false
-        return False
+        # Or true if the default value was set
+        # NOTE: This stores the string RANDOM_STRING_314324 in the dict
+        # so subsequent calls will be caught in the first test here.
+        return self["RANDOM_STRING_314324"] is not None
 
     # Python 2 and 3 have different conventions for boolean method
     __nonzero__ = __bool__
@@ -67,7 +64,6 @@ class MultiDetOptionAction(argparse.Action):
         else:
             self.internal_type = str
         new_default = DictWithDefaultReturn(lambda: default)
-        # new_default.default_value=default
         if nargs == 0:
             raise ValueError(
                 "nargs for append actions must be > 0; if arg "
@@ -89,7 +85,7 @@ class MultiDetOptionAction(argparse.Action):
             metavar=metavar,
         )
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
         # Again this is modified from the standard argparse 'append' action
         err_msg = f"Issue with option: {self.dest} \n"
         err_msg += f"Received value: {' '.join(values)} \n"
@@ -118,7 +114,6 @@ class MultiDetOptionAction(argparse.Action):
                     err_msg += "If you are supplying a value for all ifos, you "
                     err_msg += "cannot also supply values for specific ifos."
                     raise ValueError(err_msg)
-                # items.default_value = self.internal_type(value[0])
                 new_default = self.internal_type(value[0])
                 items.default_factory = lambda: new_default
                 items.default_set = True
@@ -139,7 +134,7 @@ class MultiDetOptionActionSpecial(MultiDetOptionAction):
     value to H1:CHANNEL_NAME for this example.
     """
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
         # Again this is modified from the standard argparse 'append' action
         err_msg = f"Issue with option: {self.dest} \n"
         err_msg += f"Received value: {' '.join(values)} \n"
@@ -184,7 +179,7 @@ class MultiDetMultiColonOptionAction(MultiDetOptionAction):
     corresponding detector.
     """
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
         err_msg = ("Issue with option: {}\nReceived value: {}\n").format(
             self.dest, " ".join(values)
         )
@@ -205,7 +200,7 @@ class MultiDetMultiColonOptionAction(MultiDetOptionAction):
 
 
 class MultiDetOptionAppendAction(MultiDetOptionAction):
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
         # Again this is modified from the standard argparse 'append' action
         if getattr(namespace, self.dest, None) is None:
             setattr(namespace, self.dest, {})
@@ -270,7 +265,7 @@ class DictOptionAction(argparse.Action):
             metavar=metavar,
         )
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
         # Again this is modified from the standard argparse 'append' action
         err_msg = f"Issue with option: {self.dest} \n"
         err_msg += f"Received value: {' '.join(values)} \n"
@@ -305,7 +300,7 @@ class MultiDetDictOptionAction(DictOptionAction):
     values of those parameters.
     """
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
         # Again this is modified from the standard argparse 'append' action
         err_msg = ("Issue with option: {}\nReceived value: {}\n").format(
             self.dest, " ".join(values)
@@ -493,7 +488,7 @@ def convert_to_process_params_dict(opt):
     for arg, val in vars(opt).items():
         if isinstance(val, DictWithDefaultReturn):
             new_val = []
-            for key in val.keys():
+            for key in val:
                 if isinstance(val[key], list):
                     for item in val[key]:
                         if item is not None:

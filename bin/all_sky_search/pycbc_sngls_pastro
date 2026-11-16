@@ -208,15 +208,12 @@ for cfilename in args.coinc_statmap_files:
             c_starts = cfile["segments/" + ctype + "/start"][:]
             c_ends = cfile["segments/" + ctype + "/end"][:]
         # Test if the ifo is actually in this statmap file
-        if "ifos" in cfile.attrs.keys():
+        if "ifos" in cfile.attrs:
             ifolist = cfile.attrs["ifos"].split(" ")
             time_key = sngl_ifo + "/time"
         else:
             ifolist = [cfile.attrs["detector_1"], cfile.attrs["detector_2"]]
-            if sngl_ifo == cfile.attrs["detector_1"]:
-                time_key = "time1"
-            else:
-                time_key = "time2"
+            time_key = "time1" if sngl_ifo == cfile.attrs["detector_1"] else "time2"
 
         if sngl_ifo not in ifolist:
             logger.warning("IFO %s is not in file %s", sngl_ifo, cfilename)
@@ -260,7 +257,7 @@ signal_weights = np.array([])
 # This method requires injection definition files and injection single statmap files to be
 # in the same order - would prefer to not have to do this
 for inj_filename, inj_trigger_filename in zip(
-    args.inj_files, args.inj_single_statmap_files
+    args.inj_files, args.inj_single_statmap_files, strict=True
 ):
     logger.info("Reading injection statistic file")
     with pycbc.io.HFile(inj_trigger_filename, "r") as inj_trig_f:
@@ -343,7 +340,10 @@ elif args.pastro_method == "truncated_shelf":
         [max(bg_stat[bg_stat < fs]) if fs > min_bg else -np.inf for fs in fgs]
     )
     ts_norm = np.array(
-        [sig_kern.integrate_box_1d(sbel, fs) for sbel, fs in zip(stat_below, fgs)]
+        [
+            sig_kern.integrate_box_1d(sbel, fs)
+            for sbel, fs in zip(stat_below, fgs, strict=True)
+        ]
     )
     noise_model[pastro_noise_valid] = sig_kern(fgs) / ts_norm
 
@@ -380,7 +380,7 @@ if args.plot_distribution:
         ts_norm = np.array(
             [
                 sig_kern.integrate_box_1d(sbel, sbc)
-                for sbel, sbc in zip(stat_below_plt, stat_bin_c)
+                for sbel, sbc in zip(stat_below_plt, stat_bin_c, strict=True)
             ]
         )
         noise_mod_plt = sig_kern(stat_bin_c) / ts_norm

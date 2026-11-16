@@ -42,7 +42,7 @@ def convert_to_sngl_inspiral_table(params, proc_id):
         tmplt = return_empty_sngl()
 
         tmplt.process_id = proc_id
-        for colname, value in zip(col_names, values):
+        for colname, value in zip(col_names, values, strict=True):
             setattr(tmplt, colname, value)
         tmplt.mtotal, tmplt.eta = pnutils.mass1_mass2_to_mtotal_eta(
             tmplt.mass1, tmplt.mass2
@@ -89,9 +89,8 @@ def output_sngl_inspiral_table(
 
     # get IFO to put in search summary table
     ifos = []
-    if "channel_name" in opt_dict.keys():
-        if opt_dict["channel_name"] is not None:
-            ifos = [opt_dict["channel_name"][0:2]]
+    if opt_dict.get("channel_name") is not None:
+        ifos = [opt_dict["channel_name"][0:2]]
 
     proc = create_process_table(
         outdoc, program_name=program_name, detectors=ifos, options=opt_dict
@@ -113,7 +112,7 @@ def output_sngl_inspiral_table(
     # get times to put in search summary table
     start_time = 0
     end_time = 0
-    if "gps_start_time" in opt_dict.keys() and "gps_end_time" in opt_dict.keys():
+    if "gps_start_time" in opt_dict and "gps_end_time" in opt_dict:
         start_time = opt_dict["gps_start_time"]
         end_time = opt_dict["gps_end_time"]
 
@@ -164,7 +163,7 @@ def output_bank_to_hdf(
 
     """
     bank_dict = {}
-    mass1, mass2, spin1z, spin2z = list(zip(*temp_bank))
+    mass1, mass2, spin1z, spin2z = list(zip(*temp_bank, strict=True))
     bank_dict["mass1"] = mass1
     bank_dict["mass2"] = mass2
     bank_dict["spin1z"] = spin1z

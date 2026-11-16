@@ -193,6 +193,9 @@ class FrequencySeries(Array):
             return self._epoch == other._epoch and self._delta_f == other._delta_f
         return False
 
+    # Defining __eq__ makes instances unhashable; make that explicit
+    __hash__ = None
+
     def almost_equal_elem(self, other, tol, relative=True, dtol=0.0):
         """
         Compare whether two frequency series are almost equal, element
@@ -419,7 +422,7 @@ class FrequencySeries(Array):
             # non-zero value < flow.
             data_lal = output.data.data
             first_idx = _numpy.argmax(data_lal > 0)
-            if not first_idx == 0:
+            if first_idx != 0:
                 data_lal[:first_idx] = data_lal[first_idx]
             psddict = {ifo: output}
             utils.write_filename(make_psd_xmldoc(psddict), path, compress="auto")
@@ -589,8 +592,7 @@ class FrequencySeries(Array):
         from matplotlib import pyplot
 
         if self.kind == "real":
-            plot = pyplot.plot(self.sample_frequencies, self, **kwds)
-            return plot
+            return pyplot.plot(self.sample_frequencies, self, **kwds)
         if self.kind == "complex":
             plot1 = pyplot.plot(self.sample_frequencies, self.real(), **kwds)
             plot2 = pyplot.plot(self.sample_frequencies, self.imag(), **kwds)
@@ -642,9 +644,8 @@ def load_frequencyseries(path, group=None):
         with h5py.File(path, "r") as f:
             data = f[key][:]
             delta_f = f[key].attrs["delta_f"]
-            epoch = f[key].attrs["epoch"] if "epoch" in f[key].attrs else None
-            series = FrequencySeries(data, delta_f=delta_f, epoch=epoch)
-        return series
+            epoch = f[key].attrs.get("epoch")
+            return FrequencySeries(data, delta_f=delta_f, epoch=epoch)
     else:
         raise ValueError("Path must end with .npy, .hdf, or .txt")
 

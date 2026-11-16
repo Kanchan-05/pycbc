@@ -157,10 +157,9 @@ def FinalSpin(Xi, eta):
 
 def fRD(a, M):
     """Calculate the ring-down frequency for the final Kerr BH. Using Eq. 5.5 of Main paper"""
-    f = (C_SI**3.0 / (2.0 * PI * G_SI * M * MSUN_SI)) * (
+    return (C_SI**3.0 / (2.0 * PI * G_SI * M * MSUN_SI)) * (
         1.5251 - 1.1568 * (1.0 - a) ** 0.1292
     )
-    return f
 
 
 def Qa(a):
@@ -184,10 +183,7 @@ def imrphenomc_tmplt(**kwds):
     spin1z = float128(kwds["spin1z"])
     spin2z = float128(kwds["spin2z"])
 
-    if "out" in kwds:
-        out = kwds["out"]
-    else:
-        out = None
+    out = kwds.get("out")
 
     # Calculate binary parameters
     M = mass1 + mass2

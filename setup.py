@@ -28,10 +28,11 @@ from setuptools import Command, Extension, find_packages, setup
 from setuptools.command.build_ext import build_ext as _build_ext
 
 requires = []
-setup_requires = ["numpy>=1.16.0"]
-install_requires = setup_requires + [
+setup_requires = ["numpy>=2.0.0"]
+install_requires = [
+    *setup_requires,
     "cython>=0.29",
-    "numpy>=1.16.0,!=1.19.0,!=2.2.2",
+    "numpy>=2.0.0,!=2.2.2",
     "scipy>=0.16.0,<1.17.0",
     "astropy>=2.0.3,!=4.2.1,!=4.0.5",
     "matplotlib>=1.5.1",
@@ -47,7 +48,7 @@ install_requires = setup_requires + [
     "pegasus-wms.api >= 5.1.1",
     "igwn-ligolw >= 2.1.0",
     "igwn-segments",
-    "lalsuite!=7.2",
+    "lalsuite!=7.2,!=8.0.0",
     "lscsoft-glue>=1.59.3",
     "pykerr",
 ]
@@ -206,8 +207,10 @@ def get_reqs_from_file(filename):
     return reqs
 
 
-extras_require["test"] = get_reqs_from_file("requirements.txt") + get_reqs_from_file(
-    "companion.txt"
+extras_require["test"] = (
+    get_reqs_from_file("requirements.txt")
+    + get_reqs_from_file("companion.txt")
+    + ["coverage"]
 )
 
 # do the actual work of building the package
@@ -239,7 +242,7 @@ cython_link_args = []
 # disable openmp builds on MacOSX. Optimization should never really be a
 # concern on that OS, and this line can be commented out if needed anyway.
 # Mac's also alias gcc and can run into troubles getting libc correctly
-if not sys.platform == "darwin":
+if sys.platform != "darwin":
     cython_compile_args += ["-fopenmp"]
     cython_link_args += ["-fopenmp"]
 else:
@@ -260,11 +263,14 @@ for name in cythonext:
     )
     ext.append(e)
 
+with open("README.md") as fp:
+    long_description = fp.read()
+
 setup(
     name="PyCBC",
     version=VERSION,
     description="Core library to analyze gravitational-wave data, find signals, and study their parameters.",
-    long_description=open("README.md").read(),
+    long_description=long_description,
     long_description_content_type="text/markdown",
     author="The PyCBC team",
     author_email="alex.nitz@gmail.org",

@@ -227,10 +227,10 @@ except KeyError:
 for num_event in range(num_events):
     files = FileList([])
     logger.info("Processing event: %s", num_event + 1)
-    tags = args.tags + [str(num_event + 1)]
+    tags = [*args.tags, str(num_event + 1)]
     if wiki_file:
         row = []
-        for key in fp.keys():
+        for key in fp:
             row.append(fp[key][num_event])
         add_wiki_row(wiki_file, row)
     # Handle injections

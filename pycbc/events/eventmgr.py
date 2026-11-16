@@ -48,9 +48,10 @@ logger = logging.getLogger(__name__)
 @schemed("pycbc.events.threshold_")
 def threshold(series, value):
     """Return list of values and indices values over threshold in series."""
-    err_msg = "This function is a stub that should be overridden using the "
-    err_msg += "scheme. You shouldn't be seeing this error!"
-    raise ValueError(err_msg)
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 @schemed("pycbc.events.threshold_")
@@ -59,9 +60,10 @@ def threshold_only(series, value):
     Return list of values and indices whose values in series are
     larger (in absolute value) than value
     """
-    err_msg = "This function is a stub that should be overridden using the "
-    err_msg += "scheme. You shouldn't be seeing this error!"
-    raise ValueError(err_msg)
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 # FIXME: This should be under schemed, but I don't understand that yet!
@@ -75,16 +77,18 @@ def threshold_real_numpy(series, value):
 @schemed("pycbc.events.threshold_")
 def threshold_and_cluster(series, threshold, window):
     """Return list of values and indices values over threshold in series."""
-    err_msg = "This function is a stub that should be overridden using the "
-    err_msg += "scheme. You shouldn't be seeing this error!"
-    raise ValueError(err_msg)
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 @schemed("pycbc.events.threshold_")
 def _threshold_cluster_factory(series):
-    err_msg = "This class is a stub that should be overridden using the "
-    err_msg += "scheme. You shouldn't be seeing this error!"
-    raise ValueError(err_msg)
+    raise NotImplementedError(
+        "This class is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 class ThresholdCluster:
@@ -221,7 +225,7 @@ class EventManager:
         self.array_minsize = array_minsize
 
         self.event_dtype = [("template_id", int)]
-        for col, coltype in zip(column, column_types):
+        for col, coltype in zip(column, column_types, strict=True):
             self.event_dtype.append((col, coltype))
 
         self._events = numpy.zeros([self.array_minsize], dtype=self.event_dtype)
@@ -288,7 +292,8 @@ class EventManager:
         self._events[:num_keep] = self._events[: self._events_size][indices]
         self._events_size = num_keep
 
-    def chisq_threshold(self, value, num_bins, delta=0):
+    # num_bins is unused, but kept so that existing calls keep working
+    def chisq_threshold(self, value, num_bins, delta=0):  # noqa: ARG002
         keep = numpy.ones(self._events_size, dtype=bool)
         for i, event in enumerate(self.events):
             xi = event["chisq"] / (
@@ -380,7 +385,7 @@ class EventManager:
         # they shouldn't all be None
         assert new_events is not None
         new_events["template_id"] = self.template_index
-        for c, v in zip(columns, vectors):
+        for c, v in zip(columns, vectors, strict=True):
             if v is not None:
                 if isinstance(v, Array):
                     new_events[c] = v.numpy()
@@ -466,9 +471,8 @@ class EventManager:
 
     def make_output_dir(self, outname):
         path = os.path.dirname(outname)
-        if path != "":
-            if not os.path.exists(path) and path is not None:
-                os.makedirs(path)
+        if path != "" and not os.path.exists(path) and path is not None:
+            os.makedirs(path)
 
     def save_performance(self, ncores, nfilters, ntemplates, run_time, setup_time):
         """
@@ -654,7 +658,7 @@ class EventManagerMultiDetBase(EventManager):
             self.ifo_reverse[i] = ifo
 
         self.event_dtype = [("template_id", int), ("event_id", int)]
-        for col, coltype in zip(column, column_types):
+        for col, coltype in zip(column, column_types, strict=True):
             self.event_dtype.append((col, coltype))
 
         self._events = numpy.zeros([self.array_minsize], dtype=self.event_dtype)
@@ -729,7 +733,7 @@ class EventManagerCoherent(EventManagerMultiDetBase):
         self.network_event_dtype = [(ifo + "_event_id", int) for ifo in self.ifos]
         self.network_event_dtype.append(("template_id", int))
         self.network_event_dtype.append(("event_id", int))
-        for col, coltype in zip(network_column, network_column_types):
+        for col, coltype in zip(network_column, network_column_types, strict=True):
             self.network_event_dtype.append((col, coltype))
         self.network_events = numpy.zeros(
             [self.array_minsize], dtype=self.network_event_dtype
@@ -767,7 +771,7 @@ class EventManagerCoherent(EventManagerMultiDetBase):
         slide_indices = net_event_dict[:net_event_size]["slide_id"] == slide
         cvec = net_event_dict[:net_event_size][column][slide_indices]
         tvec = net_event_dict[:net_event_size][tcolumn][slide_indices]
-        if not window_size == 0:
+        if window_size != 0:
             # cluster events over the window
 
             # findchirp_cluster_over_window requires the input to be time
@@ -805,7 +809,7 @@ class EventManagerCoherent(EventManagerMultiDetBase):
         # they shouldn't all be None
         assert new_events is not None
         new_events["template_id"] = self.template_index
-        for c, v in zip(columns, vectors):
+        for c, v in zip(columns, vectors, strict=True):
             if v is not None:
                 if isinstance(v, Array):
                     new_events[c] = v.numpy()
@@ -906,16 +910,6 @@ class EventManagerCoherent(EventManagerMultiDetBase):
                         dtype=numpy.float32,
                     )
                     f["sigmasq"] = template_sigmasq[tid]
-
-                # FIXME: Can we get this value from the autochisq instance?
-                # cont_dof = self.opt.autochi_number_points
-                # if self.opt.autochi_onesided is None:
-                #     cont_dof = cont_dof * 2
-                # if self.opt.autochi_two_phase:
-                #     cont_dof = cont_dof * 2
-                # if self.opt.autochi_max_valued_dof:
-                #     cont_dof = self.opt.autochi_max_valued_dof
-                # f['cont_chisq_dof'] = numpy.repeat(cont_dof, len(ifo_events))
 
                 if "chisq_dof" in ifo_events.dtype.names:
                     f["chisq_dof"] = ifo_events["chisq_dof"] / 2 + 1
@@ -1106,7 +1100,7 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
             self.event_index = self.event_index + num_events
 
         if perform_coincidence:
-            if not len(self.ifos) == 2:
+            if len(self.ifos) != 2:
                 err_msg = "Coincidence currently only supported for 2 ifos."
                 raise ValueError(err_msg)
             ifo1 = self.ifos[0]
@@ -1136,7 +1130,7 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
                     end_times1, end_times2, coinc_window
                 )
                 if len(idx_list1):
-                    for idx1, idx2 in zip(idx_list1, idx_list2):
+                    for idx1, idx2 in zip(idx_list1, idx_list2, strict=True):
                         event1 = curr_tev_dict1[:curr_tev_size1][idx1]
                         event2 = curr_tev_dict2[:curr_tev_size2][idx2]
                         self.coinc_list.append((event1, event2))
@@ -1210,10 +1204,6 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
                 cont_dof = self.opt.autochi_number_points
                 if self.opt.autochi_onesided is None:
                     cont_dof = cont_dof * 2
-                # if self.opt.autochi_two_phase:
-                #     cont_dof = cont_dof * 2
-                # if self.opt.autochi_max_valued_dof:
-                #     cont_dof = self.opt.autochi_max_valued_dof
                 f["cont_chisq_dof"] = numpy.repeat(cont_dof, len(ifo_events))
 
                 if "chisq_dof" in ifo_events.dtype.names:

@@ -142,8 +142,7 @@ class RefineSampler(DummySampler):
         logger.info("checking prior")
         keep = self.model.prior_distribution.contains(params)
         logger.info("done checking")
-        r = numpy.array([params[k][keep] for k in self.vparam])
-        return r
+        return numpy.array([params[k][keep] for k in self.vparam])
 
     @staticmethod
     def compare_kde(kde1, kde2, size=int(1e4)):
@@ -186,14 +185,12 @@ class RefineSampler(DummySampler):
             entropy_diff,
             frac_offbase,
         )
-        if (
+        return bool(
             entropy_diff < self.entropy
             and step >= self.min_refinement_steps
             and max(abs(dlogz), abs(dlogz2)) < self.dlogz_target
             and frac_offbase < self.offbase_fraction
-        ):
-            return True
-        return False
+        )
 
     @classmethod
     def from_config(cls, cp, model, output_file=None, nprocesses=1, use_mpi=False):

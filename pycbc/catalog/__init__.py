@@ -57,10 +57,7 @@ def find_event_in_catalog(name, source=None):
     """
     from .catalog import get_source, list_catalogs
 
-    if source is None:
-        catalogs = list_catalogs()
-    else:
-        catalogs = [source]
+    catalogs = list_catalogs() if source is None else [source]
 
     for catalog in catalogs:
         try:
@@ -72,8 +69,7 @@ def find_event_in_catalog(name, source=None):
                 cname = data[mname]["commonName"]
                 if cname.upper() == name.upper():
                     name = mname
-                    data = data[name]
-                    return data
+                    return data[name]
     raise ValueError(f"Did not find merger matching name: {name}")
 
 
@@ -132,8 +128,7 @@ class Merger:
                 return (mid, low, high)
             return self.data[name]
         except KeyError as e:
-            print(e)
-            raise RuntimeError(f"Cannot get parameter {name}")
+            raise RuntimeError(f"Cannot get parameter {name}") from e
 
     def strain(self, ifo, duration=32, sample_rate=4096):
         """
@@ -241,6 +236,6 @@ class Catalog:
             for m in self.mergers
         ]
         if return_errors:
-            value, merror, perror = zip(*v)
+            value, merror, perror = zip(*v, strict=True)
             return numpy.array(value), numpy.array(merror), numpy.array(perror)
         return numpy.array(v)

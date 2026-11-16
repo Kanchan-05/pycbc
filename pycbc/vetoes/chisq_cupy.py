@@ -24,7 +24,6 @@
 
 # GPU kernel notation (N is the correlation length passed to the kernels,
 # BS a block size).
-# ruff: noqa: N803, N806
 import functools
 
 import cupy as cp
@@ -252,7 +251,7 @@ def get_cached_bin_layout(bins):
         else:
             k = list(numpy.arange(s, e, BS / 2))
             kmin += k
-            kmax += k[1:] + [e]
+            kmax += [*k[1:], e]
             bv += [i] * len(k)
     bv = cp.array(bv, dtype=cp.uint32)
     kmin = cp.array(kmin, dtype=cp.uint32)
@@ -261,16 +260,12 @@ def get_cached_bin_layout(bins):
 
 
 def shift_sum_points(num, N, arg_tuple):
-    # fuse = 'fuse' in corr.gpu_callback_method
     fuse = False
 
     fn, nt = get_pchisq_fn(num, fuse_correlate=fuse)
     corr, outp, phase, np, nb, N, kmin, kmax, bv, nbins = arg_tuple
-    if fuse:
-        args = [corr.htilde.data, corr.stilde.data]
-    else:
-        args = [corr.data]
-    args += [outp, N] + phase[0:num]
+    args = [corr.htilde.data, corr.stilde.data] if fuse else [corr.data]
+    args += [outp, N, *phase[0:num]]
     args += [kmin, kmax, bv, nbins]
     fn(
         (nb,),
@@ -285,17 +280,13 @@ def shift_sum_points(num, N, arg_tuple):
 
 
 def shift_sum_points_pow2(num, arg_tuple):
-    # fuse = 'fuse' in corr.gpu_callback_method
     fuse = False
 
     fn, nt = get_pchisq_fn_pow2(num, fuse_correlate=fuse)
 
     corr, outp, points, np, nb, N, kmin, kmax, bv, nbins = arg_tuple
-    if fuse:
-        args = [corr.htilde.data, corr.stilde.data]
-    else:
-        args = [corr.data]
-    args += [outp, N] + points[0:num] + [kmin, kmax, bv, nbins]
+    args = [corr.htilde.data, corr.stilde.data] if fuse else [corr.data]
+    args += [outp, N, *points[0:num], kmin, kmax, bv, nbins]
     fn((nb,), (nt,), tuple(args))
 
     outp = outp[num * nbins :]
@@ -309,7 +300,7 @@ def get_cached_pow2(N):
     return not (N & (N - 1))
 
 
-def shift_sum(corr, points, bins):
+def shift_sum(corr, points, bins, weights=None):
     kmin, kmax, bv = get_cached_bin_layout(bins)
     nb = len(kmin)
     N = numpy.uint32(len(corr))
@@ -346,4 +337,7 @@ def shift_sum(corr, points, bins):
             elif np == 1:
                 outp, phase, np = shift_sum_points(1, cargs)  # pylint:disable=no-value-for-parameter
 
-    return cp.asnumpy((outc.conj() * outc).sum(axis=1).real)
+    power = (outc.conj() * outc).real
+    if weights is not None:
+        power = power * cp.asarray(weights, dtype=power.dtype)
+    return cp.asnumpy(power.sum(axis=1))

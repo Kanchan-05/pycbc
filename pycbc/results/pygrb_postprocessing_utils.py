@@ -259,8 +259,9 @@ def _read_seg_files(seg_files):
     # Needs to be in this order for consistency with build_segment_filelist
     keys = ["buffer", "off", "on"]
 
-    for key, seg_file in zip(keys, seg_files):
-        segs = fromsegwizard(open(seg_file))
+    for key, seg_file in zip(keys, seg_files, strict=True):
+        with open(seg_file) as fp:
+            segs = fromsegwizard(fp)
         if len(segs) > 1:
             err_msg = "More than one segment, an error has occured."
             raise RuntimeError(err_msg)
@@ -346,12 +347,12 @@ def load_data(input_file, ifos, rw_snr_threshold=None, data_tag=None, slide_id=N
     trigs = HFile(input_file, "r")
     rw_snr = (
         trigs["network/reweighted_snr"][:]
-        if "network/reweighted_snr" in trigs.keys()
+        if "network/reweighted_snr" in trigs
         else numpy.array([])
     )
     net_ids = (
         trigs["network/event_id"][:]
-        if "network/event_id" in trigs.keys()
+        if "network/event_id" in trigs
         else numpy.array([], dtype=numpy.int64)
     )
 
@@ -368,7 +369,7 @@ def load_data(input_file, ifos, rw_snr_threshold=None, data_tag=None, slide_id=N
     for ifo in ifos:
         ifo_ids[ifo] = (
             trigs[ifo + "/event_id"][:]
-            if ifo + "/event_id" in trigs.keys()
+            if ifo + "/event_id" in trigs
             else numpy.array([], dtype=numpy.int64)
         )
     trigs.close()
@@ -418,7 +419,7 @@ def load_data(input_file, ifos, rw_snr_threshold=None, data_tag=None, slide_id=N
         mask = numpy.full(sum(above_thresh), True)
         # When necessary and possible, update the mask so it selects a given
         # slide id
-        if slide_id is not None and "network/slide_id" in trigs.keys():
+        if slide_id is not None and "network/slide_id" in trigs:
             mask = numpy.where(trigs["network/slide_id"][above_thresh] == slide_id)[0]
         for path, dset in _dataset_iterator(trigs):
             # The dataset contains search or missed injections information,
@@ -437,7 +438,7 @@ def load_data(input_file, ifos, rw_snr_threshold=None, data_tag=None, slide_id=N
             else:
                 trigs_dict[path] = dset[above_thresh]
 
-            if "network/slide_id" in trigs.keys():
+            if "network/slide_id" in trigs:  # noqa: SIM102
                 # The slide selection is applied to datasets that contain
                 # properties of surviving triggers. These datasets are
                 # identified knowing that each trigger has a slide id, so
@@ -486,10 +487,10 @@ def apply_vetoes_to_found_injs(
     """
     keep_keys = keys or found_injs.keys()
 
-    if not found_missed_file or ifos[0] + "/end_time" not in found_injs.keys():
+    if not found_missed_file or ifos[0] + "/end_time" not in found_injs:
         t_id_key = "network/template_id"
         if t_id_key not in keep_keys:
-            keep_keys = list(keep_keys + [t_id_key])
+            keep_keys = [*keep_keys, t_id_key]
         empty_dict = dict.fromkeys(keep_keys, numpy.array([]))
         empty_dict[t_id_key] = empty_dict[t_id_key].astype(dtype=numpy.int64)
         return (empty_dict, empty_dict, None, None)
@@ -571,7 +572,9 @@ def sort_trigs(trial_dict, trigs, slide_dict, seg_dict):
     # Begin by sorting the triggers into each slide
     for slide_id in slide_dict:
         sorted_trigs[slide_id] = []
-    for slide_id, event_id in zip(trigs["network/slide_id"], trigs["network/event_id"]):
+    for slide_id, event_id in zip(
+        trigs["network/slide_id"], trigs["network/event_id"], strict=True
+    ):
         if slide_id in slide_dict:
             sorted_trigs[slide_id].append(event_id)
 
@@ -662,7 +665,7 @@ def extract_ifos(trig_file, ifo=None):
     hdf_file = HFile(trig_file, "r")
 
     # Extract IFOs
-    ifos = sorted(list(hdf_file.keys()))
+    ifos = sorted(hdf_file.keys())
 
     # Remove unwanted keys from key list to reduce it to the ifos
     for key in ["network", "found", "missed"]:
@@ -734,9 +737,7 @@ def load_segment_dict(hdf_file_path):
 
     # Write segment_dict in proper format
     # At the moment of this comment, there is only one segment
-    segment_dict = {slide: seg_list.coalesce() for slide in slide_ids}
-
-    return segment_dict
+    return {slide: seg_list.coalesce() for slide in slide_ids}
 
 
 # =============================================================================
@@ -868,10 +869,7 @@ def mc_cal_wf_errs(num_mc_injs, inj_dists, cal_err, wf_err, max_dc_cal_err):
 def get_coinc_snr(trigs_or_injs):
     """Calculate coincident SNR using coherent and null SNRs"""
     coinc_snr = numpy.array([])
-    if (
-        "network/coherent_snr" in trigs_or_injs.keys()
-        and "network/null_snr" in trigs_or_injs.keys()
-    ):
+    if "network/coherent_snr" in trigs_or_injs and "network/null_snr" in trigs_or_injs:
         coh_snr_sq = numpy.square(trigs_or_injs["network/coherent_snr"][:])
         null_snr_sq = numpy.square(trigs_or_injs["network/null_snr"][:])
         coinc_snr = numpy.sqrt(coh_snr_sq + null_snr_sq)
@@ -891,8 +889,8 @@ def template_hash_to_id(trigger_file, bank_path):
     bank_file: filepath for template bank
 
     """
-    ifos = [k for k in trigger_file.keys() if k != "network"]
-    if ifos[0] + "/template_hash" not in trigger_file.keys():
+    ifos = [k for k in trigger_file if k != "network"]
+    if ifos[0] + "/template_hash" not in trigger_file:
         return numpy.array([], dtype=int)
     with HFile(bank_path, "r") as bank:
         hashes = bank["template_hash"][:]

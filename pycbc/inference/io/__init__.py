@@ -28,7 +28,7 @@ import numpy
 from pycbc import waveform as _waveform
 from pycbc.inference.option_utils import ParseLabelArg, ParseParametersArg
 from pycbc.io.hdf import dump_state, load_state
-from pycbc.io.record import FieldArray, _numpy_function_lib
+from pycbc.io.record import FieldArray, _numpy_function_lib, get_vars_from_arg
 
 from .cpnest import CPNestFile
 from .dynesty import DynestyFile
@@ -266,16 +266,16 @@ def validate_checkpoint_files(checkpoint_file, backup_file, check_nsamples=True)
     if backup_valid:
         with loadfile(backup_file, "r") as fp:
             backup_valid = fp.validate()
-    if check_nsamples:
+    if check_nsamples:  # noqa: SIM102
         # This check is not required by nested samplers
         # check that the checkpoint and backup have the same number of samples;
         # if not, assume the checkpoint has the correct number
         if checkpoint_valid and backup_valid:
             with loadfile(checkpoint_file, "r") as fp:
-                group = list(fp[fp.samples_group].keys())[0]
+                group = next(iter(fp[fp.samples_group].keys()))
                 nsamples = fp[fp.samples_group][group].size
             with loadfile(backup_file, "r") as fp:
-                group = list(fp[fp.samples_group].keys())[0]
+                group = next(iter(fp[fp.samples_group].keys()))
                 backup_nsamples = fp[fp.samples_group][group].size
             backup_valid = nsamples == backup_nsamples
         # decide what to do based on the files' statuses
@@ -299,6 +299,35 @@ def validate_checkpoint_files(checkpoint_file, backup_file, check_nsamples=True)
 #
 # =============================================================================
 #
+def get_sampled_parameters(fp):
+    """Gets the parameters in a file's samples group that are, or are derived
+    from, the variable params.
+
+    Any parameter in the samples group that is in the file's
+    ``variable_params`` is included. If the file has a ``remapped_params``
+    attribute, any parameter in the samples group that was created from a
+    function of the ``variable_params`` is also included. Everything else in
+    the samples group (e.g., likelihood stats) is excluded.
+
+    Parameters
+    ----------
+    fp : io.PosteriorFile
+        A loaded posterior instance.
+
+    Returns
+    -------
+    set :
+        List of the parameter names.
+    """
+    samples = set(fp[fp.samples_group].keys())
+    variable_params = set(fp.variable_params)
+    parameters = variable_params & samples
+    for func, param in fp.attrs.get("remapped_params", []):
+        if param in samples and get_vars_from_arg(func) & variable_params:
+            parameters.add(param)
+    return parameters
+
+
 def get_common_parameters(input_files, collection=None):
     """
     Gets a list of variable params that are common across all input files.
@@ -313,7 +342,9 @@ def get_common_parameters(input_files, collection=None):
         What group of parameters to load. Can be the name of a list of
         parameters stored in the files' attrs (e.g., "variable_params"), or
         "all". If "all", will load all of the parameters in the files'
-        samples group. Default is to load all.
+        samples group. If "sampled", will load all the parameters in the files'
+        samples group that are, or are derived from, the variable params (see
+        ``get_sampled_parameters``). Default is to load all.
 
     Returns
     -------
@@ -328,6 +359,8 @@ def get_common_parameters(input_files, collection=None):
         fp = loadfile(fn, "r")
         if collection == "all":
             ps = fp[fp.samples_group].keys()
+        elif collection == "sampled":
+            ps = get_sampled_parameters(fp)
         else:
             ps = fp.attrs[collection]
         parameters.append(set(ps))
@@ -373,7 +406,7 @@ class PrintFileParams(argparse.Action):
         super().__init__(nargs=nargs, **kwargs)
         self.skip_args = skip_args
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
         # get the input file(s)
         input_files = namespace.input_file
         if input_files is None:
@@ -401,15 +434,15 @@ class PrintFileParams(argparse.Action):
             fp.close()
         # now print information about the intersection of all parameters
         parameters = get_common_parameters(input_files, collection="all")
-        print(
+        print(  # noqa: T201
             "\n"
             + textwrap.fill("Parameters available with this (these) input file(s):"),
             end="\n\n",
         )
-        print(textwrap.fill(" ".join(sorted(parameters))), end="\n\n")
+        print(textwrap.fill(" ".join(sorted(parameters))), end="\n\n")  # noqa: T201
         # information about the pycbc functions
         pfuncs = sorted(FieldArray.functionlib.fget(FieldArray).keys())
-        print(
+        print(  # noqa: T201
             textwrap.fill(
                 "Available pycbc functions (see "
                 "http://pycbc.org/pycbc/latest/html for "
@@ -417,7 +450,7 @@ class PrintFileParams(argparse.Action):
             ),
             end="\n\n",
         )
-        print(textwrap.fill(", ".join(pfuncs)), end="\n\n")
+        print(textwrap.fill(", ".join(pfuncs)), end="\n\n")  # noqa: T201
         # numpy funcs
         npfuncs = sorted(
             [
@@ -426,13 +459,13 @@ class PrintFileParams(argparse.Action):
                 if isinstance(obj, numpy.ufunc)
             ]
         )
-        print(textwrap.fill("Available numpy functions:"), end="\n\n")
-        print(textwrap.fill(", ".join(npfuncs)), end="\n\n")
+        print(textwrap.fill("Available numpy functions:"), end="\n\n")  # noqa: T201
+        print(textwrap.fill(", ".join(npfuncs)), end="\n\n")  # noqa: T201
         # misc
         consts = "e euler_gamma inf nan pi"
-        print(textwrap.fill("Recognized constants:"), end="\n\n")
-        print(consts, end="\n\n")
-        print(
+        print(textwrap.fill("Recognized constants:"), end="\n\n")  # noqa: T201
+        print(consts, end="\n\n")  # noqa: T201
+        print(  # noqa: T201
             textwrap.fill(
                 "Python arthimetic (+ - * / // ** %), "
                 "binary (&, |, etc.), and comparison (>, <, >=, "
@@ -446,12 +479,12 @@ class PrintFileParams(argparse.Action):
             "options that may be provided, along with the "
             "input files that understand them:"
         )
-        print("\n" + outstr, end="\n\n")
+        print("\n" + outstr, end="\n\n")  # noqa: T201
         for ftype, fparser in fileparsers.items():
             fnames = ", ".join(filesbytype[ftype])
             if fparser is None:
                 outstr = textwrap.fill(f"File(s) {fnames} use no additional options.")
-                print(outstr, end="\n\n")
+                print(outstr, end="\n\n")  # noqa: T201
             else:
                 fparser.usage = fnames
                 fparser.print_help()
@@ -494,11 +527,13 @@ class ResultsArgumentParser(argparse.ArgumentParser):
         to not be included. May also specify sampler-specific arguments. Note
         that ``input-file``, ``file-help``, and ``parameters`` are always
         added.
-    defaultparams : {'variable_params', 'all'}, optional
+    defaultparams : {'variable_params', 'sampled', 'all'}, optional
         If no ``--parameters`` provided, which collection of parameters to
-        load. If 'all' will load all parameters in the file's
-        ``samples_group``. If 'variable_params' or None (the default) will load
-        the variable parameters.
+        load. If 'sampled' will load all parameters in the file's
+        ``samples_group`` that are, or are derived from, the variable params.
+        If 'all', will load all parameters in the file's ``samples_group``.
+        If 'variable_params' or None (the default), will load the variable
+        parameters.
     autoparamlabels : bool, optional
         Passed to ``add_results_option_group``; see that function for details.
     \**kwargs :
@@ -853,8 +888,5 @@ def injections_from_cli(opts):
             # add the rest as new fields
             ps = list(mapvals.keys())
             these_injs = these_injs.add_fields([mapvals[p] for p in ps], names=ps)
-        if injections is None:
-            injections = these_injs
-        else:
-            injections = injections.append(these_injs)
+        injections = these_injs if injections is None else injections.append(these_injs)
     return injections

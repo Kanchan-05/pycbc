@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 use("agg")
 
 # add options to command line
-parser = io.ResultsArgumentParser()
+parser = io.ResultsArgumentParser(defaultparams="sampled")
 pycbc.add_common_pycbc_options(parser)
 # program-specific
 parser.add_argument("--output-file", type=str, required=True, help="Output plot path.")
@@ -69,7 +69,9 @@ parser.add_argument(
     "--colors-multi-run",
     nargs="+",
     type=str,
-    help="For multiple runs, provide colours to be used for successively. Default setting is to use the successive colours specified in matplotlib color cycle.",
+    help="For multiple runs, provide colours to be used for successively. "
+    "Default setting is to use the successive colours specified "
+    "in matplotlib color cycle.",
 )
 parser.add_argument(
     "--fill-hist",
@@ -91,6 +93,7 @@ option_utils.add_plot_posterior_option_group(parser)
 option_utils.add_scatter_option_group(parser)
 # density configuration
 option_utils.add_density_option_group(parser)
+
 parser.add_argument(
     "--plot-maxl",
     action="store_true",
@@ -117,6 +120,7 @@ parser.add_argument(
 parser.add_argument(
     "--dpi", type=int, default=200, help="Set the DPI of the plot. Default is 200."
 )
+
 # style option
 add_style_opt_to_parser(parser)
 
@@ -315,10 +319,7 @@ for i, s in enumerate(samples):
         axis_dict = None
 
     # get a default line color; this is used for the 1D marginal lines
-    if opts.hist_color:
-        linecolor = opts.hist_color
-    else:
-        linecolor = next(colors)
+    linecolor = opts.hist_color or next(colors)
     # set different colors depending on if one or more files was provided
     if len(opts.input_file) == 1:
         # make the hist color black or white, depending on if dark background
@@ -330,10 +331,7 @@ for i, s in enumerate(samples):
         else:
             hist_color = "black"
         # fill histogram if fill_hist is True
-        if opts.fill_hist:
-            fill_color = opts.hist_fill_color
-        else:
-            fill_color = None
+        fill_color = opts.hist_fill_color if opts.fill_hist else None
         # make the default contour color white if plot density is on
         if not opts.contour_color and opts.plot_density:
             contour_color = "white"
@@ -415,7 +413,7 @@ if opts.plot_prior:
 if len(opts.input_file) > 1:
     handles = []
     labels = []
-    for color, fn in zip(hist_colors, opts.input_file):
+    for color, fn in zip(hist_colors, opts.input_file, strict=True):
         label = opts.input_file_labels[fn]
         handles.append(patches.Patch(color=color, label=label))
         labels.append(label)

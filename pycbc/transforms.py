@@ -87,7 +87,7 @@ class BaseTransform:
         if isinstance(old_maps, record.FieldArray):
             keys = new_maps.keys()
             values = [new_maps[key] for key in keys]
-            for key, vals in zip(keys, values):
+            for key, vals in zip(keys, values, strict=True):
                 try:
                     old_maps = old_maps.add_fields([vals], [key])
                 except ValueError:
@@ -134,12 +134,9 @@ class BaseTransform:
         tag = outputs
         if skip_opts is None:
             skip_opts = []
-        if additional_opts is None:
-            additional_opts = {}
-        else:
-            additional_opts = additional_opts.copy()
+        additional_opts = {} if additional_opts is None else additional_opts.copy()
         outputs = set(outputs.split(VARARGS_DELIM))
-        special_args = ["name"] + skip_opts + list(additional_opts.keys())
+        special_args = ["name", *skip_opts, *list(additional_opts.keys())]
         # get any extra arguments to pass to init
         extra_args = {}
         for opt in cp.options("-".join([section, tag])):
@@ -234,18 +231,15 @@ class CustomTransform(BaseTransform):
             # we'll get a ValueError if the scratch space isn't the same size
             # as the maps; in that case, re-create the scratch space with the
             # appropriate size and try again
-            invals = maps[list(self.inputs)[0]]
-            if isinstance(invals, numpy.ndarray):
-                shape = invals.shape
-            else:
-                shape = len(invals)
+            invals = maps[next(iter(self.inputs))]
+            shape = invals.shape if isinstance(invals, numpy.ndarray) else len(invals)
             self._createscratch(shape)
             for p in self.inputs:
                 self._scratch[p][:] = maps[p]
 
     def _getslice(self, maps):
         """Determines how to slice the scratch for returning values."""
-        invals = maps[list(self.inputs)[0]]
+        invals = maps[next(iter(self.inputs))]
         if not isinstance(invals, (numpy.ndarray, list)):
             getslice = 0
         else:
@@ -2538,10 +2532,7 @@ class Logit(BaseTransform):
         opt = f"min-{inputvar}"
         if skip_opts is None:
             skip_opts = []
-        if additional_opts is None:
-            additional_opts = {}
-        else:
-            additional_opts = additional_opts.copy()
+        additional_opts = {} if additional_opts is None else additional_opts.copy()
         if cp.has_option(s, opt):
             a = cp.get_opt_tag(section, opt, outputs)
             skip_opts.append(opt)
@@ -3028,10 +3019,7 @@ class Logistic(Logit):
         outputvar = cp.get_opt_tag(section, "output", outputs)
         if skip_opts is None:
             skip_opts = []
-        if additional_opts is None:
-            additional_opts = {}
-        else:
-            additional_opts = additional_opts.copy()
+        additional_opts = {} if additional_opts is None else additional_opts.copy()
         s = "-".join([section, outputs])
         opt = f"min-{outputvar}"
         if cp.has_option(s, opt):
@@ -3283,10 +3271,7 @@ def apply_transforms(samples, transforms, inverse=False):
         transforms = transforms[::-1]
     for t in transforms:
         try:
-            if inverse:
-                samples = t.inverse_transform(samples)
-            else:
-                samples = t.transform(samples)
+            samples = t.inverse_transform(samples) if inverse else t.transform(samples)
         except NotImplementedError:
             continue
     return samples
@@ -3345,7 +3330,7 @@ def order_transforms(transforms):
     # get a set of all inputs and all outputs
     outputs = set().union(*[set(t.outputs) - set(t.inputs) for t in transforms])
     out = []
-    remaining = [t for t in transforms]
+    remaining = list(transforms)
     while remaining:
         # pull out transforms that have no inputs in the set of outputs
         leftover = []

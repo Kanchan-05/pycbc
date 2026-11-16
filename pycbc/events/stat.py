@@ -159,7 +159,7 @@ class Stat:
             self.update_file(file_key)
         self.file_hashes = self.get_file_hashes()
 
-    def update_file(self, key):
+    def update_file(self, key):  # noqa: ARG002
         """
         Update file used in this statistic referenced by key.
         """
@@ -186,7 +186,7 @@ class Stat:
             trigs, self.sngl_ranking, **self.sngl_ranking_kwargs
         )
 
-    def single(self, trigs):  # pylint:disable=unused-argument
+    def single(self, trigs):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Calculate the necessary single detector information
 
@@ -205,7 +205,7 @@ class Stat:
         err_msg += "sub-classes. You shouldn't be seeing this error!"
         raise NotImplementedError(err_msg)
 
-    def rank_stat_single(self, single_info):  # pylint:disable=unused-argument
+    def rank_stat_single(self, single_info):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Calculate the statistic for a single detector candidate
 
@@ -225,7 +225,7 @@ class Stat:
         err_msg += "sub-classes. You shouldn't be seeing this error!"
         raise NotImplementedError(err_msg)
 
-    def rank_stat_coinc(self, s, slide, step, to_shift, **kwargs):  # pylint:disable=unused-argument
+    def rank_stat_coinc(self, s, slide, step, to_shift, **kwargs):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Calculate the coincident detection statistic.
         """
@@ -255,7 +255,7 @@ class Stat:
             err_msg += "list of allowed_names above."
             raise NotImplementedError(err_msg)
 
-    def coinc_lim_for_thresh(self, s, thresh, limifo, **kwargs):  # pylint:disable=unused-argument
+    def coinc_lim_for_thresh(self, s, thresh, limifo, **kwargs):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Optimization function to identify coincs too quiet to be of interest
 
@@ -310,7 +310,7 @@ class QuadratureSumStatistic(Stat):
         """
         return single_info[1]
 
-    def rank_stat_coinc(self, sngls_list, slide, step, to_shift, **kwargs):  # pylint:disable=unused-argument
+    def rank_stat_coinc(self, sngls_list, slide, step, to_shift, **kwargs):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Calculate the coincident detection statistic.
 
@@ -336,7 +336,7 @@ class QuadratureSumStatistic(Stat):
             cstat[sngls == -1] = 0
         return cstat
 
-    def coinc_lim_for_thresh(self, s, thresh, limifo, **kwargs):  # pylint:disable=unused-argument
+    def coinc_lim_for_thresh(self, s, thresh, limifo, **kwargs):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Optimization function to identify coincs too quiet to be of interest
 
@@ -440,7 +440,7 @@ class PhaseTDStatistic(QuadratureSumStatistic):
 
         # Is the histogram needed to be pre-generated?
         hist_needed = pregenerate_hist
-        hist_needed &= not len(ifos) == 1
+        hist_needed &= len(ifos) != 1
         hist_needed &= type(self).__name__ == "PhaseTD" or self.kwargs["phasetd"]
 
         if hist_needed:
@@ -485,9 +485,7 @@ class PhaseTDStatistic(QuadratureSumStatistic):
         # If there are other phasetd_newsnr files, they aren't needed.
         # So tidy them out of the self.files dictionary
         rejected = [
-            key
-            for key in self.files.keys()
-            if "phasetd_newsnr" in key and not key == selected
+            key for key in self.files if "phasetd_newsnr" in key and key != selected
         ]
         for k in rejected:
             del self.files[k]
@@ -617,7 +615,7 @@ class PhaseTDStatistic(QuadratureSumStatistic):
                 )
                 self.two_det_weights[ifo][id0, id1, id2] = self.weights[ifo]
 
-        for ifo, sense in zip(self.hist_ifos, relfac):
+        for ifo, sense in zip(self.hist_ifos, relfac, strict=True):
             self.relsense[ifo] = sense
 
         self.has_hist = True
@@ -628,7 +626,7 @@ class PhaseTDStatistic(QuadratureSumStatistic):
         If others are used (i.e. this statistic is inherited), they will
         need updated separately
         """
-        if "phasetd_newsnr" in key and not len(self.ifos) == 1:
+        if "phasetd_newsnr" in key and len(self.ifos) != 1:
             if "".join(sorted(self.ifos)) not in key:
                 logger.debug(
                     "%s file is not used for %s statistic", key, "".join(self.ifos)
@@ -661,7 +659,7 @@ class PhaseTDStatistic(QuadratureSumStatistic):
         """
         # Convert time shift vector to dict, as hist ifos and self.ifos may
         # not be in same order
-        to_shift = {ifo: s for ifo, s in zip(self.ifos, to_shift)}
+        to_shift = dict(zip(self.ifos, to_shift, strict=True))
 
         if not self.has_hist:
             self.get_hist()
@@ -906,7 +904,7 @@ class ExpFitStatistic(PhaseTDStatistic):
 
         # Get the single-detector rates fit files
         # the stat file attributes are hard-coded as '%{ifo}-fit_coeffs'
-        parsed_attrs = [f.split("-") for f in self.files.keys()]
+        parsed_attrs = [f.split("-") for f in self.files]
         self.bg_ifos = [
             at[0] for at in parsed_attrs if (len(at) == 2 and at[1] == "fit_coeffs")
         ]
@@ -969,7 +967,7 @@ class ExpFitStatistic(PhaseTDStatistic):
 
             for ifo in self.ifos:
                 key = f"{ifo}-dq_stat_info"
-                if key in self.files.keys():
+                if key in self.files:
                     self.dq_rates_by_state[ifo] = self.assign_dq_rates(key)
                     self.dq_bin_by_tid[ifo] = self.assign_template_bins(key)
                     self.check_low_latency(key)
@@ -1016,13 +1014,12 @@ class ExpFitStatistic(PhaseTDStatistic):
             tids = []
             bin_nums = []
             bin_grp = dq_file[f"{ifo}/bins"]
-            for bin_name in bin_grp.keys():
+            for bin_name in bin_grp:
                 bin_tids = bin_grp[f"{bin_name}/tids"][:]
                 tids = list(tids) + list(bin_tids.astype(int))
                 bin_nums = list(bin_nums) + list([bin_name] * len(bin_tids))
 
-        bin_dict = dict(zip(tids, bin_nums))
-        return bin_dict
+        return dict(zip(tids, bin_nums, strict=True))
 
     def assign_dq_rates(self, key):
         """
@@ -1045,7 +1042,7 @@ class ExpFitStatistic(PhaseTDStatistic):
         with h5py.File(self.files[key], "r") as dq_file:
             bin_grp = dq_file[f"{ifo}/bins"]
             dq_dict = {}
-            for bin_name in bin_grp.keys():
+            for bin_name in bin_grp:
                 dq_dict[bin_name] = bin_grp[f"{bin_name}/dq_rates"][:]
 
         return dq_dict
@@ -1058,7 +1055,7 @@ class ExpFitStatistic(PhaseTDStatistic):
         with h5py.File(self.files[key], "r") as dq_file:
             ifo_grp = dq_file[ifo]
             dq_state_segs_dict = {}
-            for k in ifo_grp["dq_segments"].keys():
+            for k in ifo_grp["dq_segments"]:
                 seg_dict = {}
                 seg_dict["start"] = ifo_grp[f"dq_segments/{k}/segment_starts"][:]
                 seg_dict["end"] = ifo_grp[f"dq_segments/{k}/segment_ends"][:]
@@ -1066,7 +1063,8 @@ class ExpFitStatistic(PhaseTDStatistic):
 
         return dq_state_segs_dict
 
-    def find_dq_noise_rate(self, trigs, dq_state):
+    # trigs is unused, but kept so that existing calls keep working
+    def find_dq_noise_rate(self, trigs, dq_state):  # noqa: ARG002
         """Get dq values for a specific ifo and dq states"""
         dq_val = numpy.ones(len(dq_state))
 
@@ -1110,7 +1108,7 @@ class ExpFitStatistic(PhaseTDStatistic):
         ifo = key.split("-")[0]
         with h5py.File(self.files[key], "r") as dq_file:
             ifo_grp = dq_file[ifo]
-            if "dq_segments" not in ifo_grp.keys():
+            if "dq_segments" not in ifo_grp:
                 # if segs are not in file, we must be in LL
                 if self.dq_state_segments is not None:
                     raise ValueError(
@@ -1293,7 +1291,7 @@ class ExpFitStatistic(PhaseTDStatistic):
         """
         # The stat file attributes are hard-coded as 'signal-kde_file'
         # and 'template-kde_file'
-        parsed_attrs = [f.split("-") for f in self.files.keys()]
+        parsed_attrs = [f.split("-") for f in self.files]
         self.kde_names = [
             at[0] for at in parsed_attrs if (len(at) == 2 and at[1] == "kde_file")
         ]
@@ -1488,9 +1486,7 @@ class ExpFitStatistic(PhaseTDStatistic):
         # determined by the least sensitive ifo
         network_sigmasq = numpy.amin([sngl[1]["sigmasq"] for sngl in sngls], axis=0)
         # Volume \propto sigma^3 or sigmasq^1.5
-        network_logvol = 1.5 * numpy.log(network_sigmasq) - benchmark_logvol
-
-        return network_logvol
+        return 1.5 * numpy.log(network_sigmasq) - benchmark_logvol
 
     def logsignalrate_shared(self, sngls_info):
         """
@@ -1637,7 +1633,7 @@ class ExpFitStatistic(PhaseTDStatistic):
             ln_noise_rate -= numpy.log(hist_vol)
 
             # What is the signal pdf?
-            stat = {ifo: st for ifo, st in s}
+            stat = dict(s)
             ln_s += self.logsignalrate(stat, slide * step, to_shift)
 
         # Add in the feature-dependent terms to the signal rate
@@ -1812,7 +1808,7 @@ class ExpFitCombinedSNR(ExpFitStatistic):
             sngl_multiifo = -1.0 * single_info[1]
         return sngl_multiifo
 
-    def rank_stat_coinc(self, s, slide, step, to_shift, **kwargs):  # pylint:disable=unused-argument
+    def rank_stat_coinc(self, s, slide, step, to_shift, **kwargs):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Calculate the coincident detection statistic.
 
@@ -1835,7 +1831,7 @@ class ExpFitCombinedSNR(ExpFitStatistic):
         # scale by 1/sqrt(number of ifos) to resemble network SNR
         return sum(sngl[1] for sngl in s) / (len(s) ** 0.5)
 
-    def coinc_lim_for_thresh(self, s, thresh, limifo, **kwargs):  # pylint:disable=unused-argument
+    def coinc_lim_for_thresh(self, s, thresh, limifo, **kwargs):  # pylint:disable=unused-argument  # noqa: ARG002
         """
         Optimization function to identify coincs too quiet to be of interest
 
@@ -1930,7 +1926,7 @@ def insert_statistic_option_group(parser, default_ranking_statistic=None):
         "--ranking-statistic",
         default=default_ranking_statistic,
         choices=statistic_dict.keys(),
-        required=True if default_ranking_statistic is None else False,
+        required=default_ranking_statistic is None,
         help="The coinc ranking statistic to calculate",
     )
 
@@ -2053,8 +2049,6 @@ def get_statistic_from_opts(opts, ifos):
         opts.statistic_keywords,
     )
 
-    stat_class = get_statistic(opts.ranking_statistic)(
+    return get_statistic(opts.ranking_statistic)(
         opts.sngl_ranking, opts.statistic_files, ifos=ifos, **extra_kwargs
     )
-
-    return stat_class

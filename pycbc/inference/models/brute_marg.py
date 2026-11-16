@@ -42,7 +42,6 @@ class LikelihoodWrapper:
         _model = model
 
     def __call__(self, params):
-        global _model
         _model.update(**params)
         loglr = _model.loglr
         return loglr, _model.current_stats
@@ -490,8 +489,7 @@ class BruteLISASkyModesMarginalize(BaseGaussianNoise):
 
     @property
     def _extra_stats(self):
-        stats = self.model._extra_stats
-        return stats
+        return self.model._extra_stats
 
     def _loglr(self):
         params = []

@@ -135,10 +135,7 @@ def read_frame(
     if end_time and duration:
         raise ValueError("end time and duration are mutually exclusive")
 
-    if type(location) is list:
-        locations = location
-    else:
-        locations = [location]
+    locations = location if type(location) is list else [location]
 
     cache = locations_to_cache(locations)
     if sieve:
@@ -258,7 +255,13 @@ def get_site_from_type_or_channel(frame_type, channels):
 
 
 def query_and_read_frame(
-    frame_type, channels, start_time, end_time, sieve=None, check_integrity=False
+    frame_type,
+    channels,
+    start_time,
+    end_time,
+    sieve=None,
+    check_integrity=False,
+    sample_rate=None,
 ):
     """
     Read time series from frame data.
@@ -286,6 +289,9 @@ def query_and_read_frame(
         expression sieve
     check_integrity : boolean
         Do an expensive checksum of the file before returning.
+    sample_rate : int, optional
+        Sample rate in Hz for GWOSC/LOSC frames only. See
+        `pycbc.frame.gwosc.get_run`. Ignored for other frame types.
 
     Returns
     -------
@@ -308,12 +314,15 @@ def query_and_read_frame(
 
         if not isinstance(channels, list):
             channels = [channels]
-        data = [read_strain_gwosc(c[:2], start_time, end_time) for c in channels]
+        data = [
+            read_strain_gwosc(c[:2], start_time, end_time, sample_rate)
+            for c in channels
+        ]
         return data if len(data) > 1 else data[0]
     if frame_type in ["LOSC", "GWOSC"]:
         from pycbc.frame.gwosc import read_frame_gwosc
 
-        return read_frame_gwosc(channels, start_time, end_time)
+        return read_frame_gwosc(channels, start_time, end_time, sample_rate)
 
     logger.info("Querying datafind server")
     paths = frame_paths(

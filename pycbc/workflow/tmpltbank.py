@@ -147,8 +147,14 @@ def setup_tmpltbank_workflow(
     return tmplt_banks_return
 
 
+# psd_files is unused; the signature matches the other template bank setup functions
 def setup_tmpltbank_dax_generated(
-    workflow, science_segs, datafind_outs, output_dir, tags=None, psd_files=None
+    workflow,
+    science_segs,
+    datafind_outs,
+    output_dir,
+    tags=None,
+    psd_files=None,  # noqa: ARG001
 ):
     """
     Setup template bank jobs that are generated as part of the CBC workflow.
@@ -273,10 +279,7 @@ def setup_tmpltbank_without_frames(
     tmplt_banks = FileList([])
 
     # Make the distinction between one bank for all ifos and one bank per ifo
-    if independent_ifos:
-        ifo_list = [ifo for ifo in ifos]
-    else:
-        ifo_list = [[ifo for ifo in ifos]]
+    ifo_list = list(ifos) if independent_ifos else [list(ifos)]
 
     # Check for the write_psd flag
     if cp.has_option_tags("workflow-tmpltbank", "tmpltbank-write-psd-file", tags):
@@ -380,7 +383,7 @@ def make_compress_split_banks(workflow, bank_files, out_dir, tags=None):
             "compress",
             ifos=workflow.ifos,
             out_dir=out_dir,
-            tags=tags + [f"bank%0{n_dp}d" % i],
+            tags=[*tags, f"bank%0{n_dp}d" % i],
         ).create_node()
         node.add_input_opt("--bank-file", bank_file)
         node.new_output_file_opt(workflow.analysis_time, ".hdf", "--output")
@@ -406,7 +409,7 @@ def make_combine_split_banks(workflow, bank_files, out_dir, tags=None):
             "combine_banks",
             ifos=workflow.ifos,
             out_dir=out_dir,
-            tags=tags + [f"%0{n_dp}d" % i],
+            tags=[*tags, f"%0{n_dp}d" % i],
         ).create_node()
         start = int(i / n_banks_combined * len(bank_files))
         end = int((i + 1) / n_banks_combined * len(bank_files))

@@ -272,7 +272,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
         """
 
     @staticmethod
-    def extra_args_parser(parser=None, skip_args=None, **kwargs):
+    def extra_args_parser(parser=None, skip_args=None, **kwargs):  # noqa: ARG004
         r"""
         Provides a parser that can be used to parse sampler-specific command
         line options for loading samples.
@@ -525,8 +525,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
         pos = self[dataset_name].attrs["pos"]
         has_gauss = self[dataset_name].attrs["has_gauss"]
         cached_gauss = self[dataset_name].attrs["cached_gauss"]
-        state = s, arr, pos, has_gauss, cached_gauss
-        return state
+        return s, arr, pos, has_gauss, cached_gauss
 
     def write_strain(self, strain_dict, group=None):
         """
@@ -542,10 +541,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
 
         """
         subgroup = self.data_group + "/{ifo}/strain"
-        if group is None:
-            group = subgroup
-        else:
-            group = "/".join([group, subgroup])
+        group = subgroup if group is None else "/".join([group, subgroup])
         for ifo, strain in strain_dict.items():
             self[group.format(ifo=ifo)] = strain
             self[group.format(ifo=ifo)].attrs["delta_t"] = strain.delta_t
@@ -565,10 +561,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
 
         """
         subgroup = self.data_group + "/{ifo}/stilde"
-        if group is None:
-            group = subgroup
-        else:
-            group = "/".join([group, subgroup])
+        group = subgroup if group is None else "/".join([group, subgroup])
         for ifo, stilde in stilde_dict.items():
             self[group.format(ifo=ifo)] = stilde
             self[group.format(ifo=ifo)].attrs["delta_f"] = stilde.delta_f
@@ -591,10 +584,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
 
         """
         subgroup = self.data_group + "/{ifo}/psds/0"
-        if group is None:
-            group = subgroup
-        else:
-            group = "/".join([group, subgroup])
+        group = subgroup if group is None else "/".join([group, subgroup])
         for ifo in psds:
             self[group.format(ifo=ifo)] = psds[ifo]
             self[group.format(ifo=ifo)].attrs["delta_f"] = psds[ifo].delta_f
@@ -651,8 +641,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
         else:
             group = "/".join([group, self.injections_group])
         injset = InjectionSet(self.filename, hdf_group=group)
-        injections = injset.table.view(FieldArray)
-        return injections
+        return injset.table.view(FieldArray)
 
     def write_command_line(self):
         """
@@ -717,7 +706,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
         """
         logger.info("Copying metadata")
         # copy attributes
-        for key in self.attrs.keys():
+        for key in self.attrs:
             other.attrs[key] = self.attrs[key]
 
     def copy_info(self, other, ignore=None):
@@ -740,7 +729,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
             ignore = []
         if isinstance(ignore, str):
             ignore = [ignore]
-        ignore = set(ignore + [self.samples_group])
+        ignore = {*ignore, self.samples_group}
         copy_groups = set(self.keys()) - ignore
         for key in copy_groups:
             super().copy(key, other)
@@ -858,9 +847,9 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
             )
             # if any down selection was done, re-set the default
             # thin-start/interval/end
-            p = tuple(self[self.samples_group].keys())[0]
+            p = next(iter(self[self.samples_group].keys()))
             my_shape = self[self.samples_group][p].shape
-            p = tuple(other[other.samples_group].keys())[0]
+            p = next(iter(other[other.samples_group].keys()))
             other_shape = other[other.samples_group][p].shape
             if my_shape != other_shape:
                 other.attrs["thin_start"] = 0
@@ -960,7 +949,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
                 group.create_dataset(
                     name,
                     dshape,
-                    maxshape=tuple(list(dshape)[:-1] + [None]),
+                    maxshape=(*list(dshape)[:-1], None),
                     dtype=data.dtype,
                     fletcher32=True,
                 )
@@ -993,11 +982,8 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
             index = list(map(int, self[self.config_group].keys()))
         except KeyError:
             index = []
-        if index == []:
-            # hasn't been written yet
-            index = 0
-        else:
-            index = max(index) + 1
+        # index is [] if it hasn't been written yet
+        index = 0 if index == [] else max(index) + 1
         # we'll store the config file as a text file that is pickled
         out = StringIO()
         cp.write(out)
@@ -1071,7 +1057,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
         else:
             path = "/".join([group, self.data_group])
         data = {}
-        for det in self[path].keys():
+        for det in self[path]:
             group = self[fmt.format(path, det)]
             data[det] = FrequencySeries(
                 group[()], delta_f=group.attrs["delta_f"], epoch=group.attrs["epoch"]
@@ -1104,7 +1090,7 @@ class BaseInferenceFile(h5py.File, metaclass=ABCMeta):
         else:
             path = "/".join([group, self.data_group])
         psds = {}
-        for det in self[path].keys():
+        for det in self[path]:
             group = self[fmt.format(path, det)]
             psds[det] = FrequencySeries(group[()], delta_f=group.attrs["delta_f"])
         return psds

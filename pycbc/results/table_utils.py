@@ -94,30 +94,23 @@ def html_table(columns, names, page_size=None, format_strings=None):
     if len({len(column) for column in columns}) != 1:
         raise ValueError("All columns must have the same length")
 
-    if page_size is None:
-        page = "disable"
-    else:
-        page = "enable"
+    page = "disable" if page_size is None else "enable"
 
     div_id = uuid.uuid4()
 
     column_descriptions = []
-    for column, name in zip(columns, names):
-        if column.dtype.kind in "iuf":
-            # signed and unsigned integers and floats
-            ctype = "number"
-        else:
-            # this comprises strings, bools, complex, void, etc
-            # but we will convert all those to str in a moment
-            ctype = "string"
+    for column, name in zip(columns, names, strict=True):
+        # signed and unsigned integers and floats are numbers; everything else
+        # (strings, bools, complex, void, etc) will be converted to str in a moment
+        ctype = "number" if column.dtype.kind in "iuf" else "string"
         column_descriptions.append((ctype, name))
 
     data = []
-    for row in zip(*columns):
+    for row in zip(*columns, strict=True):
         row2 = []
         # the explicit conversions here are to make sure the JS code
         # sees proper numbers and not something like 'np.float64(12)'
-        for item, column in zip(row, columns):
+        for item, column in zip(row, columns, strict=True):
             if column.dtype.kind == "f":
                 row2.append(float(item))
             elif column.dtype.kind in "iu":

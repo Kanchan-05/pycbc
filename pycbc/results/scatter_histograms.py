@@ -87,10 +87,7 @@ def create_axes_grid(
     ndim = len(parameters)
     if no_diagonals:
         ndim -= 1
-    if ndim < 3:
-        fsize = (8, 7)
-    else:
-        fsize = (ndim * 3 - 1, ndim * 3 - 2)
+    fsize = (8, 7) if ndim < 3 else (ndim * 3 - 1, ndim * 3 - 2)
     fig = pyplot.figure(figsize=fsize)
     # create the axis grid
     gs = gridspec.GridSpec(
@@ -118,10 +115,7 @@ def create_axes_grid(
             ax = pyplot.subplot(gs[axes[nrow, ncolumn]])
             # map to a parameter index
             px = parameters[ncolumn]
-            if no_diagonals:
-                py = parameters[nrow + 1]
-            else:
-                py = parameters[nrow]
+            py = parameters[nrow + 1] if no_diagonals else parameters[nrow]
             if (px, py) in combos:
                 axis_dict[px, py] = (ax, nrow, ncolumn)
                 # x labels only on bottom
@@ -179,10 +173,7 @@ def construct_kde(samples_array, use_kombine=False, kdeargs=None):
     numpy.random.seed(0)
     numpy.random.shuffle(samples_array)
     # if kde arg specifies a maximum number of samples, limit them
-    if kdeargs is None:
-        kdeargs = {}
-    else:
-        kdeargs = kdeargs.copy()
+    kdeargs = {} if kdeargs is None else kdeargs.copy()
     max_nsamples = kdeargs.pop("max_kde_samples", None)
     samples_array = samples_array[:max_nsamples]
     if use_kombine:
@@ -348,10 +339,7 @@ def create_density_plot(
         if contour_color is None:
             contour_color = "k"
         # make linewidths thicker if not plotting density for clarity
-        if plot_density:
-            lw = 1
-        else:
-            lw = 2
+        lw = 1 if plot_density else 2
         ct = ax.contour(
             X,
             Y,
@@ -365,7 +353,7 @@ def create_density_plot(
         # label contours
         if label_contours:
             lbls = [f"{int(p)}%" for p in (100.0 - percentiles)]
-            fmt = dict(zip(ct.levels, lbls))
+            fmt = dict(zip(ct.levels, lbls, strict=True))
             fs = 12
             ax.clabel(ct, ct.levels, inline=True, fmt=fmt, fontsize=fs)
 
@@ -442,10 +430,7 @@ def create_marginalized_hist(
         fillcolor = "none"
     else:
         htype = "stepfilled"
-    if rotated:
-        orientation = "horizontal"
-    else:
-        orientation = "vertical"
+    orientation = "horizontal" if rotated else "vertical"
     if log_scale:
         bins = numpy.logspace(
             numpy.log10(numpy.nanmin(values)), numpy.log10(numpy.nanmax(values)), 50
@@ -469,10 +454,7 @@ def create_marginalized_hist(
     )
     if percentiles is None:
         percentiles = [5.0, 50.0, 95.0]
-    if len(percentiles) > 0:
-        plotp = numpy.percentile(values, percentiles)
-    else:
-        plotp = []
+    plotp = numpy.percentile(values, percentiles) if len(percentiles) > 0 else []
     if plot_marginal_lines:
         for val in plotp:
             if rotated:
@@ -573,9 +555,13 @@ def set_marginal_histogram_title(ax, fmt, color, label=None, rotated=False):
         title = f"{label} = {fmt}"
         tbox1 = offsetbox.TextArea(
             title,
-            textprops=dict(
-                color=color, size=15, rotation=rotation, ha="left", va="bottom"
-            ),
+            textprops={
+                "color": color,
+                "size": 15,
+                "rotation": rotation,
+                "ha": "left",
+                "va": "bottom",
+            },
         )
 
         # save a list of text boxes as attribute for later
@@ -592,11 +578,15 @@ def set_marginal_histogram_title(ax, fmt, color, label=None, rotated=False):
         # add new text box to list
         tbox1 = offsetbox.TextArea(
             f" {fmt}",
-            textprops=dict(
-                color=color, size=15, rotation=rotation, ha="left", va="bottom"
-            ),
+            textprops={
+                "color": color,
+                "size": 15,
+                "rotation": rotation,
+                "ha": "left",
+                "va": "bottom",
+            },
         )
-        ax.title_boxes = ax.title_boxes + [tbox1]
+        ax.title_boxes = [*ax.title_boxes, tbox1]
 
         # pack text boxes
         ybox = packer_class(children=ax.title_boxes, align="bottom", pad=0, sep=5)
@@ -817,12 +807,12 @@ def create_multidim_plot(
         mins = {p: samples[p].min() for p in parameters}
     else:
         # copy the dict
-        mins = {p: val for p, val in mins.items()}
+        mins = dict(mins.items())
     if maxs is None:
         maxs = {p: samples[p].max() for p in parameters}
     else:
         # copy the dict
-        maxs = {p: val for p, val in maxs.items()}
+        maxs = dict(maxs.items())
 
     # Diagonals...
     if plot_marginal:
@@ -864,10 +854,7 @@ def create_multidim_plot(
             continue
         ax, _, _ = axis_dict[px, py]
         if plot_scatter:
-            if plot_density:
-                alpha = 0.3
-            else:
-                alpha = 1.0
+            alpha = 0.3 if plot_density else 1.0
             if scatter_log_cmap:
                 cmap_norm = colors.LogNorm(vmin=vmin, vmax=vmax)
             else:

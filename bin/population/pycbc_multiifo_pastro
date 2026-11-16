@@ -214,7 +214,7 @@ if len(args.bank_files) != nchunks:
 
 # Read zerolag/time slide data chunk by chunk
 tot_exp_bg = 0
-zl_inputs = zip(args.full_data_files, args.bank_files)
+zl_inputs = zip(args.full_data_files, args.bank_files, strict=True)
 
 logger.info("Setting up zerolag")
 fg = utils.ForegroundEvents(
@@ -258,7 +258,9 @@ logger.info("Total expected bg count %s", bg.norm)
 logger.info("Actual zerolag event count %s", len(fg.stat))
 
 # Read signal (injection) data
-inj_inputs = zip(args.injection_files, args.bank_files, args.full_data_files)
+inj_inputs = zip(
+    args.injection_files, args.bank_files, args.full_data_files, strict=True
+)
 sg = utils.SignalEventRate(
     args, args.coinc_times, bin_lo=args.min_mchirp, bin_hi=args.max_mchirp
 )
@@ -282,7 +284,7 @@ allfgbg = fg.sg_pdf - fg.bg_pdf
 
 # make diagnostic plots
 if args.diagnostic_plots:
-    print("ln Bayes factors from", min(allfgbg), max(allfgbg))
+    logger.info("ln Bayes factors from %s %s", min(allfgbg), max(allfgbg))
     col = {"H1L1": "r", "H1L1V1": "b", "H1V1": "m", "L1V1": "g"}
     for cty in col:
         in_type = fg.ctype == cty
@@ -410,8 +412,8 @@ if args.vt_mean:
         logger.warning("NB : no VT error provided, will use 0!")
         args.vt_err = 0.0
     logger.info("Rate in units of %s ...", args.rate_units)
-    print("Rate without VT uncertainty :")
-    print(
+    print("Rate without VT uncertainty :")  # noqa: T201
+    print(  # noqa: T201
         f"{cmed / args.vt_mean:.1f}_{{-{abs(cminus) / args.vt_mean:.1f}}}"
         f"^{{+{cplus / args.vt_mean:.1f}}}"
     )
@@ -428,8 +430,8 @@ if args.vt_mean:
     median, minus, plus = fgmc_plots.dist_summary(
         args, rate_distribution, plot_extensions=None, credible_intervals=[0.9]
     )
-    print("Rate with VT uncertainty via rate_posterior :")
-    print(f"{median:.1f}_{{-{abs(minus):.1f}}}^{{+{plus:.1f}}}")
+    print("Rate with VT uncertainty via rate_posterior :")  # noqa: T201
+    print(f"{median:.1f}_{{-{abs(minus):.1f}}}^{{+{plus:.1f}}}")  # noqa: T201
 elif args.vt_err:
     raise RuntimeError("Can't supply VT error without a VT mean!")
 
@@ -448,7 +450,7 @@ if args.rank_injections:
     else:
         assert len(args.rank_injections) == len(args.bank_files)
         banks = args.bank_files
-    for i, b in zip(args.rank_injections, banks):
+    for i, b in zip(args.rank_injections, banks, strict=True):
         logger.info("Adding bank info from %s", b)
         inj.add_bank(b)
         inj.filter_templates()

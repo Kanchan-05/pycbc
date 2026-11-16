@@ -164,12 +164,9 @@ class HFile(HGroup, h5py.File):
             size = refs[ds].size
 
         # Apply any pre-masks
-        if premask is None:
-            mask = np.ones(size, dtype=bool)
-        else:
-            mask = premask
+        mask = np.ones(size, dtype=bool) if premask is None else premask
 
-        if not mask.dtype == bool:
+        if mask.dtype != bool:
             # mask is an array of indices rather than booleans,
             # make it a bool array
             new_mask = np.zeros(size, dtype=bool)
@@ -200,17 +197,14 @@ class HFile(HGroup, h5py.File):
                 i += chunksize
                 continue
 
-            if all(mask[i:r]):
-                # Everything allowed through the mask in this chunk
-                submask = np.arange(r - i)
-            else:
-                submask = np.flatnonzero(mask[i:r])
+            # all(...) is True if everything in this chunk is allowed through
+            submask = np.arange(r - i) if all(mask[i:r]) else np.flatnonzero(mask[i:r])
 
             # Read each chunk's worth of data
             partial_data = {arg: refs[arg][i:r][mask[i:r]] for arg in dsets}
             partial = []
             for a in args:
-                if a in derived.keys():
+                if a in derived:
                     # If this is a derived dataset, calculate it
                     derived_fcn = derived[a][0]
                     partial += [derived_fcn(partial_data)]
@@ -226,7 +220,7 @@ class HFile(HGroup, h5py.File):
 
             if return_data:
                 # Store the dataset results that pass the function
-                for arg, part in zip(args, partial):
+                for arg, part in zip(args, partial, strict=True):
                     data[arg].append(part[keep])
 
             i += chunksize
@@ -292,7 +286,7 @@ class DictArray:
                 d.close()
 
             for k in self.data:
-                if not len(self.data[k]) == 0:
+                if len(self.data[k]) != 0:
                     self.data[k] = np.concatenate(self.data[k])
                 else:
                     self.data[k] = np.array([])
@@ -304,7 +298,7 @@ class DictArray:
         return self.__class__(data=data)
 
     def __len__(self):
-        return len(self.data[tuple(self.data.keys())[0]])
+        return len(self.data[next(iter(self.data.keys()))])
 
     def __add__(self, other):
         if self.data == {}:
@@ -434,7 +428,7 @@ class StatmapData(DictArray):
     def save(self, outname):
         super().save(outname)
         with HFile(outname, "w") as f:
-            for key in self.seg.keys():
+            for key in self.seg:
                 f[f"segments/{key}/start"] = self.seg[key]["start"][:]
                 f[f"segments/{key}/end"] = self.seg[key]["end"][:]
 
@@ -699,7 +693,7 @@ class SingleDetTriggers:
 
         if filter_func:
             # Apply a filter on the triggers which is _not_ a ranking statistic
-            for rank_str in ranking.sngls_ranking_function_dict.keys():
+            for rank_str in ranking.sngls_ranking_function_dict:
                 if f"self.{rank_str}" in filter_func:
                     logger.warning(
                         "Supplying the ranking (%s) in "
@@ -708,10 +702,10 @@ class SingleDetTriggers:
                         rank_str,
                     )
             logger.info("Setting up filter function")
-            for c in self.trigs.keys():
+            for c in self.trigs:
                 if c in filter_func:
                     setattr(self, "_" + c, self.trigs[c][:])
-            for c in self.bank.keys():
+            for c in self.bank:
                 if c in filter_func:
                     # get template parameters corresponding to triggers
                     setattr(
@@ -1126,14 +1120,13 @@ class ForegroundTriggers:
                     curr_ifo = curr_dat.group_key
                     self.sngl_files[curr_ifo] = curr_dat
 
-        if not all([ifo in self.sngl_files.keys() for ifo in self.ifos]):
-            print(f"sngl_files: {sngl_files}")
-            print(f"self.ifos: {self.ifos}")
+        if not all(ifo in self.sngl_files for ifo in self.ifos):
             raise RuntimeError(
                 "IFOs in statmap file not all represented "
-                "by single-detector trigger files."
+                f"by single-detector trigger files. IFOs: {self.ifos}, "
+                f"single-detector trigger files: {sngl_files}"
             )
-        if not sorted(self.sngl_files.keys()) == sorted(self.ifos):
+        if sorted(self.sngl_files.keys()) != sorted(self.ifos):
             logger.warning(
                 "WARNING: Single-detector trigger files "
                 "given for IFOs not in the statmap file"
@@ -1242,8 +1235,9 @@ class ForegroundTriggers:
 
     def get_end_time(self):
         times_gen = (self.get_coincfile_array(f"{ifo}/time") for ifo in self.ifos)
-        ref_times = np.array([mean_if_greater_than_zero(t)[0] for t in zip(*times_gen)])
-        return ref_times
+        return np.array(
+            [mean_if_greater_than_zero(t)[0] for t in zip(*times_gen, strict=True)]
+        )
 
     def get_ifos(self):
         """
@@ -1261,8 +1255,7 @@ class ForegroundTriggers:
         for ifo in self.ifos:
             ifo_trigs = np.where(self.get_coincfile_array(ifo + "/time") < 0, "-", ifo)
             ifo_or_minus.append(ifo_trigs)
-        ifos_list = [list(trig[trig != "-"]) for trig in iter(np.array(ifo_or_minus).T)]
-        return ifos_list
+        return [list(trig[trig != "-"]) for trig in iter(np.array(ifo_or_minus).T)]
 
     def to_coinc_xml_object(self, file_name):
         outdoc = ligolw.Document()
@@ -1521,7 +1514,8 @@ class ForegroundTriggers:
         ]
         # Combine the ifo letters to make a single string per event
         triggered_detectors = [
-            "".join(triggered).encode("ascii") for triggered in zip(*triggered_matrix)
+            "".join(triggered).encode("ascii")
+            for triggered in zip(*triggered_matrix, strict=True)
         ]
         ofd.create_dataset("trig", data=triggered_detectors, dtype="<S3")
 
@@ -1535,7 +1529,7 @@ class ForegroundTriggers:
         # Combine the ifo letters to make a single string per event
         active_detectors = [
             "".join(active_at_time).encode("ascii")
-            for active_at_time in zip(*active_matrix)
+            for active_at_time in zip(*active_matrix, strict=True)
         ]
         ofd.create_dataset("obs", data=active_detectors, dtype="<S3")
 
@@ -1554,7 +1548,7 @@ class ReadByTemplate:
     ):
         self.filename = filename
         self.file = HFile(filename, "r")
-        self.ifo = ifo if ifo is not None else tuple(self.file.keys())[0]
+        self.ifo = ifo if ifo is not None else next(iter(self.file.keys()))
         self.valid = None
         self.bank = HFile(bank, "r") if bank else {}
         self.segment_name = segment_name
@@ -1572,7 +1566,7 @@ class ReadByTemplate:
             segment_name = []
         if veto_files is None:
             veto_files = []
-        for vfile, name in zip(veto_files, segment_name):
+        for vfile, name in zip(veto_files, segment_name, strict=True):
             veto_segs = veto.select_segments_by_definer(
                 vfile, ifo=self.ifo, segment_name=name
             )
@@ -1641,7 +1635,6 @@ class ReadByTemplate:
         # applying vetoes
         if self.valid:
             self.keep = veto.indices_within_times(times, self.valid[0], self.valid[1])
-        #            logger.info('applying vetoes')
         else:
             self.keep = np.arange(0, len(times))
 
@@ -1657,8 +1650,7 @@ class ReadByTemplate:
         # Calculate the trigger id by adding the relative offset in self.keep
         # to the absolute beginning index of this templates triggers stored
         # in 'template_boundaries'
-        trigger_id = self.keep + self.file[f"{self.ifo}/template_boundaries"][num]
-        return trigger_id
+        return self.keep + self.file[f"{self.ifo}/template_boundaries"][num]
 
     def __getitem__(self, col):
         """
@@ -1682,8 +1674,7 @@ class ReadByTemplate:
                 "template to read data from"
             )
         data = self.get_data(col, self.template_num)
-        data = data[self.keep] if self.valid else data
-        return data
+        return data[self.keep] if self.valid else data
 
 
 chisq_choices = [
@@ -1844,11 +1835,8 @@ def name_all_datasets(files):
 def get_all_subkeys(grp, key):
     subkey_list = []
     subkey_start = key
-    if key == "":
-        grpk = grp
-    else:
-        grpk = grp[key]
-    for sk in grpk.keys():
+    grpk = grp if key == "" else grp[key]
+    for sk in grpk:
         path = subkey_start + "/" + sk
         if isinstance(grp[path], h5py.Dataset):
             subkey_list.append(path.lstrip("/"))

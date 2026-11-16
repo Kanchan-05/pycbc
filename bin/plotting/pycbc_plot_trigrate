@@ -210,7 +210,6 @@ del stat
 
 if args.gps_start_time and args.gps_end_time:
     inside = np.logical_and(time >= args.gps_start_time, time < args.gps_end_time)
-    # stat = stat[inside]
     tid = tid[inside]
     time = time[inside]
     if trig_dur:
@@ -218,11 +217,10 @@ if args.gps_start_time and args.gps_end_time:
     logger.info("%i trigs left after restricting gps times", len(time))
 
 # now do vetoing
-for vfile, vsegmentname in zip(args.veto_file, args.veto_segment_name):
+for vfile, vsegmentname in zip(args.veto_file, args.veto_segment_name, strict=True):
     retain, junk = events.veto.indices_outside_segments(
         time, [vfile], ifo=args.ifo, segment_name=vsegmentname
     )
-    # stat = stat[retain]
     tid = tid[retain]
     time = time[retain]
     if trig_dur:
@@ -238,7 +236,6 @@ plottime = time - args.gps_start_time
 if args.thorne_limit:
     m1, m2, s1z, s2z = triggers.get_mass_spin(templatef, tid)
     inside = np.logical_and(abs(s1z) < 0.998, abs(s2z) < 0.998)
-    # stat = stat[inside]
     tid = tid[inside]
     time = time[inside]
     if trig_dur:
@@ -288,7 +285,6 @@ elif args.bin_spacing == "irreg":
     # allow bins in reverse order!
     if args.irregular_bins[1] < args.irregular_bins[0]:
         args.irregular_bins = args.irregular_bins[::-1]
-        # bincolors = bincolors[::-1]
     pbins = bin_utils.IrregularBins(args.irregular_bins)
 
 # list of bin indices
@@ -306,14 +302,14 @@ minrate = 10000
 maxrate = 0.0001
 
 fig = plt.figure()
-for i, lower, upper in zip(binind, pbins.lower(), pbins.upper()):
+for i, lower, upper in zip(binind, pbins.lower(), pbins.upper(), strict=True):
     # determine number of templates generating the triggers involved
     # using the template id
     tid_inbin = tid[pind == i]
     bintemplates[i] = len(set(tid_inbin))
     times_inbin = plottime[pind == i]
     bincounts[i] = len(times_inbin)
-    print(bincounts[i])
+    logger.debug("Triggers in bin %s: %s", i, bincounts[i])
     if len(times_inbin) == 0:
         logger.info("No trigs in bin %f-%f", lower, upper)
         continue
@@ -326,7 +322,7 @@ for i, lower, upper in zip(binind, pbins.lower(), pbins.upper()):
     else:
         yplot = kd(xplot) * bincounts[i] / bintemplates[i]
     minrate = min(minrate, yplot.max() / 5e2)
-    print(minrate)
+    logger.debug("Minimum rate so far: %s", minrate)
     maxrate = max(maxrate, yplot.max())
     binlabel = rf"{lower:.3g} - {upper:.3g}"
     plt.plot(xplot, yplot, "-", c=bincolors[i], label=binlabel)

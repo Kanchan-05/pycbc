@@ -123,7 +123,7 @@ class HierarchicalModel(BaseModel):
                 map_params(
                     [
                         HierarchicalParam.from_subname(lbl, p)
-                        for p in model._extra_stats + ["loglikelihood"]
+                        for p in [*model._extra_stats, "loglikelihood"]
                     ]
                 )
             )
@@ -244,10 +244,7 @@ class HierarchicalModel(BaseModel):
         super().write_metadata(fp, group=group)
         # write information about each submodel into a different group for
         # each one
-        if group is None or group == "/":
-            prefix = ""
-        else:
-            prefix = group + "/"
+        prefix = "" if group is None or group == "/" else group + "/"
         for lbl, model in self.submodels.items():
             model.write_metadata(fp, group=prefix + lbl)
 
@@ -482,7 +479,7 @@ class HierarchicalParam(str):
     @classmethod
     def from_subname(cls, model_label, subname):
         """Creates a HierarchicalParam from the given subname and model label."""
-        return cls(cls.delim.join([model_label, subname]), set([model_label]))
+        return cls(cls.delim.join([model_label, subname]), {model_label})
 
     @classmethod
     def parse(cls, fullname, possible_models):
@@ -546,7 +543,7 @@ def hpiter(params, possible_models):
         Iterator of :py:class:`HierarchicalParam` instances.
 
     """
-    return map(lambda x: HierarchicalParam(x, possible_models), params)
+    return (HierarchicalParam(x, possible_models) for x in params)
 
 
 def map_params(params, labels=None):
@@ -576,7 +573,7 @@ def map_params(params, labels=None):
             try:
                 param_map[lbl].update([p])
             except KeyError:
-                param_map[lbl] = set([p])
+                param_map[lbl] = {p}
     return param_map
 
 
@@ -767,10 +764,7 @@ class JointPrimaryMarginalizedModel(HierarchicalModel):
         self.primary_model._current_stats.loglr = self.primary_model.marginalize_loglr(
             sh_primary, hh_primary
         )
-        if isinstance(sh_primary, numpy.ndarray):
-            nums = len(sh_primary)
-        else:
-            nums = 1
+        nums = len(sh_primary) if isinstance(sh_primary, numpy.ndarray) else 1
 
         margin_params = {}
         if self.static_margin_params_in_other_models:
@@ -852,9 +846,7 @@ class JointPrimaryMarginalizedModel(HierarchicalModel):
         sh_total = sh_primary + sh_others
         hh_total = hh_primary + hh_others
 
-        loglr = self.primary_model.marginalize_loglr(sh_total, hh_total)
-
-        return loglr
+        return self.primary_model.marginalize_loglr(sh_total, hh_total)
 
     def others_lognl(self):
         """Calculate the combined lognl from all others sub-models."""
@@ -1050,7 +1042,7 @@ class JointPrimaryMarginalizedModel(HierarchicalModel):
         primary_model = submodels[kwargs["primary_lbl"][0]]
         marginalized_params = primary_model.marginalized_params_name.copy()
 
-        for p in primary_model.static_params.keys():
+        for p in primary_model.static_params:
             p_full = f"{kwargs['primary_lbl'][0]}__{p}"
             if p_full not in cp["static_params"]:
                 cp["static_params"][p_full] = f"{primary_model.static_params[p]}"

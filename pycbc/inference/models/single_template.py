@@ -179,7 +179,7 @@ class SingleTemplate(DistMarg, BaseGaussianNoise):
 
     def multi_loglikelihood(self, models):
         """Calculate a multi-model (signal) likelihood"""
-        models = [self] + models
+        models = [self, *models]
         loglr = 0
         # handle sum[<d|h_i> - 0.5 <h_i|h_i>]
         for m in models:
@@ -226,11 +226,12 @@ class SingleTemplate(DistMarg, BaseGaussianNoise):
 
         self.snr_draw(snrs=self.snr)
 
+        tc = self.geocentric_tc(p["tc"], p["ra"], p["dec"])
         for ifo in self.sh:
-            dt = self.det[ifo].time_delay_from_earth_center(p["ra"], p["dec"], p["tc"])
-            self.dts[ifo] = p["tc"] + dt
+            dt = self.det[ifo].time_delay_from_earth_center(p["ra"], p["dec"], tc)
+            self.dts[ifo] = tc + dt
 
-            fp, fc = self.det[ifo].antenna_pattern(p["ra"], p["dec"], 0, p["tc"])
+            fp, fc = self.det[ifo].antenna_pattern(p["ra"], p["dec"], 0, tc)
             f = (fp + 1.0j * fc) * pol_phase
 
             # Note, this includes complex conjugation already
@@ -241,5 +242,4 @@ class SingleTemplate(DistMarg, BaseGaussianNoise):
             sh_total += sh * htf
             hh_total += self.hh[ifo] * abs(htf) ** 2.0
 
-        loglr = self.marginalize_loglr(sh_total, hh_total)
-        return loglr
+        return self.marginalize_loglr(sh_total, hh_total)

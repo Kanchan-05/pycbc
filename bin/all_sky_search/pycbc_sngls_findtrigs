@@ -249,7 +249,7 @@ trigger_ids_all = np.array(trigger_ids_all, dtype=int)
 trigger_times_all = np.array(trigger_times_all)
 
 logger.info("%d events", dec_facs.size)
-for t, f in zip(threshes, factors):
+for t, f in zip(threshes, factors, strict=True):
     # Find the events with statistic above the threshold - these will be kept:
     abovethresh = stat_all >= t
     # Any events below threshold, change decimation factor to the current one
@@ -302,9 +302,5 @@ f.attrs["pivot"] = ifo
 f.attrs["fixed"] = ifo
 f.attrs["ifos"] = ifo
 f.attrs["timeslide_interval"] = 0
-
-# Do hierarchical removal
-# h_iterations = 0
-# if args.max_hierarchical_removal != 0:
 
 logger.info("Done")

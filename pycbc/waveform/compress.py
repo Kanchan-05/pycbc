@@ -299,10 +299,7 @@ def compress_waveform(
     s1 = filter.sigma(hdecomp, psd=psd, low_frequency_cutoff=fmin)
     s2 = filter.sigma(htilde, psd=psd, low_frequency_cutoff=fmin)
 
-    if psd is not None:
-        htilde2 = htilde / psd[: len(htilde)] / s2
-    else:
-        htilde2 = htilde / s2
+    htilde2 = htilde / psd[: len(htilde)] / s2 if psd is not None else htilde / s2
 
     mismatch = 1.0 - abs(
         filter.overlap_cplx(
@@ -495,7 +492,10 @@ def inline_cubic_interp(
         FrequencySeries with the decompressed waveform.
 
     """
-    return
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 @schemed("pycbc.waveform.decompress_")
@@ -546,7 +546,10 @@ def inline_quadratic_interp(
         FrequencySeries with the decompressed waveform.
 
     """
-    return
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 @schemed("pycbc.waveform.decompress_")
@@ -597,7 +600,10 @@ def inline_linear_interp(
         FrequencySeries with the decompressed waveform.
 
     """
-    return
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 @schemed("pycbc.waveform.decompress_")
@@ -651,7 +657,10 @@ def inline_quartic_interp(
         FrequencySeries with the decompressed waveform.
 
     """
-    return
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 def fd_decompress(
@@ -1017,10 +1026,7 @@ class CompressedWaveform:
             requested precision is double.
 
         """
-        if root is None:
-            root = ""
-        else:
-            root = f"{root}/"
+        root = "" if root is None else f"{root}/"
         if precision is None:
             precision = self.precision
         elif precision == "double" and self.precision == "single":
@@ -1076,10 +1082,7 @@ class CompressedWaveform:
             An instance of this class with parameters loaded from the hdf file.
 
         """
-        if root is None:
-            root = ""
-        else:
-            root = f"{root}/"
+        root = "" if root is None else f"{root}/"
         group = f"{root}compressed_waveforms/{template_hash!s}"
         fp_group = fp[group]
         sample_points = fp_group["sample_points"]

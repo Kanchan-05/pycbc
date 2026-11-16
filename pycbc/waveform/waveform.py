@@ -291,8 +291,6 @@ def _lalsim_td_waveform(**p):
             return hp, hc
         raise
 
-    # lal.DestroyDict(lal_pars)
-
     hp = TimeSeries(hp1.data.data[:], delta_t=hp1.deltaT, epoch=hp1.epoch)
     hc = TimeSeries(hc1.data.data[:], delta_t=hc1.deltaT, epoch=hc1.epoch)
 
@@ -349,7 +347,6 @@ def _lalsim_fd_waveform(**p):
     hp = FrequencySeries(hp1.data.data[:], delta_f=hp1.deltaF, epoch=hp1.epoch)
 
     hc = FrequencySeries(hc1.data.data[:], delta_f=hc1.deltaF, epoch=hc1.epoch)
-    # lal.DestroyDict(lal_pars)
     return hp, hc
 
 
@@ -424,27 +421,27 @@ cuda_fd = dict(
 
 
 def print_td_approximants():
-    print("LalSimulation Approximants")
+    print("LalSimulation Approximants")  # noqa: T201
     for approx in _lalsim_td_approximants:
-        print("  " + approx)
-    print("CUDA Approximants")
+        print("  " + approx)  # noqa: T201
+    print("CUDA Approximants")  # noqa: T201
     for approx in _cuda_td_approximants:
-        print("  " + approx)
+        print("  " + approx)  # noqa: T201
 
 
 def print_fd_approximants():
-    print("LalSimulation Approximants")
+    print("LalSimulation Approximants")  # noqa: T201
     for approx in _lalsim_fd_approximants:
-        print("  " + approx)
-    print("CUDA Approximants")
+        print("  " + approx)  # noqa: T201
+    print("CUDA Approximants")  # noqa: T201
     for approx in _cuda_fd_approximants:
-        print("  " + approx)
+        print("  " + approx)  # noqa: T201
 
 
 def print_sgburst_approximants():
-    print("LalSimulation Approximants")
+    print("LalSimulation Approximants")  # noqa: T201
     for approx in _lalsim_sgburst_approximants:
-        print("  " + approx)
+        print("  " + approx)  # noqa: T201
 
 
 def td_approximants(scheme=_scheme.mgr.state):
@@ -564,8 +561,7 @@ def props(obj, **kwargs):
     input_params = default_args.copy()
     input_params.update(pr)
     # if mode array present and is a string, convert to a list of tuples
-    input_params = parse_mode_array(input_params)
-    return input_params
+    return parse_mode_array(input_params)
 
 
 def check_args(args, required_args):
@@ -944,7 +940,7 @@ def _base_get_td_waveform_from_fd(template=None, rwrap=None, **params):
         # In the `pycbc.waveform.parameters` module, spin1z and
         # spin2z have the default value 0. Users must have input
         # masses, so no else is needed.
-        mass_spin_params = set(["mass1", "mass2", "spin1z", "spin2z"])
+        mass_spin_params = {"mass1", "mass2", "spin1z", "spin2z"}
         if mass_spin_params.issubset(set(nparams.keys())):
             m_final, spin_final = get_final_from_initial(
                 mass1=nparams["mass1"],
@@ -1010,7 +1006,7 @@ def _base_get_td_waveform_from_fd(template=None, rwrap=None, **params):
         )
         return hp, hc
     wfs = get_fd_det_waveform(**nparams)
-    for ifo in wfs.keys():
+    for ifo in wfs:
         wfs[ifo].resize(fsize)
         # avoid wraparound
         wfs[ifo] = wfs[ifo].cyclic_time_shift(-rwrap)
@@ -1114,10 +1110,7 @@ def get_interpolated_fd_waveform(dtype=numpy.complex64, return_hc=True, **params
     params["delta_f"] = df_min
     hp, hc = get_fd_waveform(**params)
     hp = hp.astype(dtype)
-    if return_hc:
-        hc = hc.astype(dtype)
-    else:
-        hc = None
+    hc = hc.astype(dtype) if return_hc else None
 
     f_end = get_waveform_end_frequency(**params)
     if f_end is None:
@@ -1282,14 +1275,6 @@ _filter_preconditions["SPAtmplt"] = spa_tmplt_precondition
 
 _filter_ends["SPAtmplt"] = spa_tmplt_end
 _filter_ends["TaylorF2"] = spa_tmplt_end
-# _filter_ends["SEOBNRv1_ROM_EffectiveSpin"] = seobnrv2_final_frequency
-# _filter_ends["SEOBNRv1_ROM_DoubleSpin"] =  seobnrv2_final_frequency
-# _filter_ends["SEOBNRv2_ROM_EffectiveSpin"] = seobnrv2_final_frequency
-# _filter_ends["SEOBNRv2_ROM_DoubleSpin"] =  seobnrv2_final_frequency
-# _filter_ends["SEOBNRv2_ROM_DoubleSpin_HI"] = seobnrv2_final_frequency
-# PhenomD returns higher frequencies than this, so commenting this out for now
-# _filter_ends["IMRPhenomC"] = seobnrv2_final_frequency
-# _filter_ends["IMRPhenomD"] = seobnrv2_final_frequency
 
 _template_amplitude_norms["SPAtmplt"] = spa_amplitude_factor
 _filter_time_lengths["SPAtmplt"] = spa_length_in_time
@@ -1375,8 +1360,8 @@ def td_fd_waveform_transform(approximant):
         _filter_time_lengths[apx_int] = _filter_time_lengths[approximant]
 
         # We can also make a td version of this
-        # This will override any existing approximants with the same name
-        # (ex. IMRPhenomXX)
+        # This will override any existing approximants with the same name,
+        # such as IMRPhenomXX
         cpu_td[approximant] = get_td_waveform_from_fd
 
 
@@ -1423,7 +1408,7 @@ def get_waveform_filter(out, template=None, **kwargs):
         wav_gen = td_wav[type(_scheme.mgr.state)]
         hp, _ = wav_gen[input_params["approximant"]](**input_params)
         # taper the time series hp if required
-        if "taper" in input_params.keys() and input_params["taper"] is not None:
+        if "taper" in input_params and input_params["taper"] is not None:
             tapermethod, taper_window = wfutils.get_taper_settings(input_params)
             hp = hp.taper_timeseries(
                 location=input_params["taper"],
@@ -1503,7 +1488,7 @@ def get_two_pol_waveform_filter(outplus, outcross, template, **kwargs):
     flen = len(outplus)
 
     # If we don't have an inclination column alpha3 might be used
-    if not hasattr(template, "inclination") and "inclination" not in kwargs:
+    if not hasattr(template, "inclination") and "inclination" not in kwargs:  # noqa: SIM102
         if hasattr(template, "alpha3"):
             kwargs["inclination"] = template.alpha3
 
@@ -1530,7 +1515,7 @@ def get_two_pol_waveform_filter(outplus, outcross, template, **kwargs):
         wav_gen = td_wav[type(_scheme.mgr.state)]
         hp, hc = wav_gen[input_params["approximant"]](**input_params)
         # taper the time series hp if required
-        if "taper" in input_params.keys() and input_params["taper"] is not None:
+        if "taper" in input_params and input_params["taper"] is not None:
             tapermethod, taper_window = wfutils.get_taper_settings(input_params)
             hp = hp.taper_timeseries(
                 location=input_params["taper"],
@@ -1568,9 +1553,7 @@ def get_two_pol_waveform_filter(outplus, outcross, template, **kwargs):
 
 
 def waveform_norm_exists(approximant):
-    if approximant in _filter_norms:
-        return True
-    return False
+    return approximant in _filter_norms
 
 
 def get_template_amplitude_norm(template=None, **kwargs):

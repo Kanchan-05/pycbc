@@ -63,17 +63,17 @@ class TestWaveform(unittest.TestCase):
         with self.context:
             for waveform in good_waveforms:
                 print(waveform)
-                hc, hp = get_td_waveform(
+                hp, _ = get_td_waveform(
                     approximant=waveform,
                     mass1=20,
                     mass2=20,
                     delta_t=1.0 / 4096,
                     f_lower=40,
                 )
-                self.assertTrue(len(hc) > 0)
+                self.assertTrue(len(hp) > 0)
             for waveform in good_waveforms:
                 print(waveform)
-                htilde, g = get_fd_waveform(
+                htilde, _ = get_fd_waveform(
                     approximant=waveform,
                     mass1=20,
                     mass2=20,
@@ -116,8 +116,8 @@ class TestWaveform(unittest.TestCase):
 
         untapered = htilde()
         for taper in [
-            dict(taper="start"),
-            dict(taper="start", taper_method="constant", taper_window=0.5),
+            {"taper": "start"},
+            {"taper": "start", "taper_method": "constant", "taper_window": 0.5},
         ]:
             diff = abs(htilde(**taper) - untapered).max()
             self.assertGreater(diff / abs(untapered).max(), 1e-3, taper)

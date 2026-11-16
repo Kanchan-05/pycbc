@@ -3,14 +3,14 @@ astropy>=2.0.3,!=4.2.1,!=4.0.5
 Mako>=1.0.1
 scipy>=0.16.0,<1.17.0
 matplotlib>=2.0.0
-numpy>=1.16.0,!=1.19.0,!=2.2.2
+numpy>=2.0.0,!=2.2.2
 pillow
 h5py>=3.0.0,!=3.7.0
 jinja2
 mpld3>=0.3
 beautifulsoup4>=4.6.0
 cython
-lalsuite!=7.2
+lalsuite!=7.2,!=8.0.0
 lscsoft-glue>=1.59.3
 igwn-segments
 tqdm
@@ -40,13 +40,14 @@ igwn-ligolw>=2.1.0
 
 # Needed for Parameter Estimation Tasks
 emcee>=3.0.0
-dynesty>=1.2
+# dynesty 3.2 removed dynesty.utils.apply_reflect, used by the dynesty sampler
+dynesty>=1.2,<3.2
 
 # For building documentation
 Sphinx>=4.2.0
 sphinx-rtd-theme>=1.0.0
 sphinxcontrib-programoutput>=0.11
-sphinx_design
+sphinx_design>=0.8
 
 # Needed for ringdown and time-domain injection (fix wrap-around issue for SMBHB)
 pykerr

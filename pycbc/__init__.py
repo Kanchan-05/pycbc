@@ -64,7 +64,7 @@ class LogFormatter(logging.Formatter):
 
     converter = dt.fromtimestamp
 
-    def formatTime(self, record, datefmt=None):  # noqa: N802
+    def formatTime(self, record, datefmt=None):  # noqa: ARG002, N802
         ct = self.converter(record.created).astimezone()
         t = ct.strftime("%Y-%m-%dT%H:%M:%S")
         s = f"{t}.{int(record.msecs):03d}"
@@ -149,13 +149,10 @@ def init_logging(
 
     """
 
-    def sig_handler(signum, frame):
+    def sig_handler(signum, frame):  # noqa: ARG001
         root_logger = logging.getLogger()
         log_level = root_logger.level
-        if log_level == logging.DEBUG:
-            log_level = logging.WARNING
-        else:
-            log_level = logging.DEBUG
+        log_level = logging.WARNING if log_level == logging.DEBUG else logging.DEBUG
         root_logger.warning("Got signal %d, setting log level to %d", signum, log_level)
         root_logger.setLevel(log_level)
 
@@ -269,7 +266,7 @@ def load_source(modname, filename):
     module = importlib.util.module_from_spec(spec)
     # The module is always executed and not cached in sys.modules.
     # Uncomment the following line to cache the module.
-    # sys.modules[module.__name__] = module
+    # sys.modules[module.__name__] = module  # noqa: ERA001
     loader.exec_module(module)
     return module
 

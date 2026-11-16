@@ -35,15 +35,11 @@ def str_to_bool(sval):
 
 def draw_sample(loglr, size=None):
     """Draw a random index from a 1-d vector with loglr weights"""
-    if size:
-        x = numpy.random.uniform(size=size)
-    else:
-        x = numpy.random.uniform()
+    x = numpy.random.uniform(size=size) if size else numpy.random.uniform()
     loglr = loglr - loglr.max()
     cdf = numpy.exp(loglr).cumsum()
     cdf /= cdf[-1]
-    xl = numpy.searchsorted(cdf, x)
-    return xl
+    return numpy.searchsorted(cdf, x)
 
 
 class DistMarg:
@@ -109,7 +105,7 @@ class DistMarg:
             old_prior = kwargs["prior"]
 
             dists = [d for d in old_prior.distributions if param not in d.params]
-            dprior = [d for d in old_prior.distributions if param in d.params][0]
+            dprior = next(d for d in old_prior.distributions if param in d.params)
             prior = JointDistribution(variable_params, *dists, **old_prior.kwargs)
             kwargs["prior"] = prior
             return dprior
@@ -201,7 +197,7 @@ class DistMarg:
             if len(wtrans) == 0:
                 wtrans = None
             kwargs["waveform_transforms"] = wtrans
-            dtrans = [d for d in waveform_transforms if "distance" in d.outputs][0]
+            dtrans = next(d for d in waveform_transforms if "distance" in d.outputs)
             v = dprior.rvs(int(1e8))
             d = dtrans.transform({pname: v[pname]})["distance"]
             d.sort()
@@ -240,11 +236,39 @@ class DistMarg:
         # Save marginalized parameters' name into one place,
         # coa_phase will be a static param if been marginalized
         if marginalize_distance:
-            self.marginalized_params_name = list(
-                self.marginalize_vector_params.keys()
-            ) + [marginalize_distance_param]
+            self.marginalized_params_name = [
+                *list(self.marginalize_vector_params.keys()),
+                marginalize_distance_param,
+            ]
 
         return variable_params, kwargs
+
+    @property
+    def tc_ref_frame(self):
+        """The frame in which tc is sampled ('geocentric' or a detector)"""
+        static = getattr(self, "static_params", None) or {}
+        return static.get("tc_ref_frame", "geocentric")
+
+    def geocentric_tc(self, tc, ra, dec):
+        """Convert tc from the frame it is sampled in to geocentric time"""
+        refframe = self.tc_ref_frame
+        if refframe == "geocentric":
+            return tc
+        refdet = getattr(self, "_tc_ref_det", None)
+        if refdet is None or refdet.name != refframe:
+            refdet = self._tc_ref_det = Detector(refframe)
+        return tc - refdet.time_delay_from_earth_center(ra, dec, tc)
+
+    @property
+    def tc_window_padding(self):
+        """
+        Maximum time offset between the tc reference frame and any
+        detector, used to pad the tc prior when searching SNR time series
+        """
+        if self.tc_ref_frame == "geocentric":
+            return EARTH_RADIUS
+        # From one detector to another can be up to an Earth diameter
+        return 2.0 * EARTH_RADIUS
 
     def reset_vector_params(self):
         """Redraw vector params from their priors"""
@@ -317,9 +341,10 @@ class DistMarg:
         self._current_params.update(self.marginalize_vector_params)
         self.sample_idx = self.premarg["sample_idx"][choice]
 
-        # Update the importance weights for each vector sample
-        logw = self.marginalize_vector_weights + logw[choice]
-        self.marginalize_vector_weights = logw - logsumexp(logw)
+        # Update the importance weights for each vector sample. They are
+        # not renormalized to sum to one: that would make the integral over
+        # the marginalized parameters an average over them instead.
+        self.marginalize_vector_weights = self.marginalize_vector_weights + logw[choice]
         return self.marginalize_vector_params
 
     def snr_draw(self, wfs=None, snrs=None, size=None):
@@ -387,7 +412,8 @@ class DistMarg:
         # Determine the common valid time range
         iref = ifos[0]
         dref = d[iref]
-        dt = dref.time_delay_from_earth_center(ra, dec, tcave)
+        # time delay from the frame tc is sampled in to the reference ifo
+        dt = dref.arrival_time(tcave, ra, dec, self.tc_ref_frame) - tcave
 
         starts = []
         ends = []
@@ -438,7 +464,8 @@ class DistMarg:
 
         # Update the current proposed times and the marginalization values
         # assumes uniform prior!
-        logw = -logweight[tci] + numpy.log(1.0 / len(logweight))
+        logw = -logweight[tci] + numpy.log(snr.delta_t / (tcmax - tcmin))
+        logw[(tc < tcmin) | (tc > tcmax)] = -numpy.inf
         self.marginalize_vector_params["tc"] = tc
         self.marginalize_vector_params["logw_partial"] = logw
 
@@ -491,8 +518,16 @@ class DistMarg:
                 fp[ifo], fc[ifo] = d[ifo].antenna_pattern(ra, dec, 0.0, tcave)
                 dtc[ifo] = d[ifo].time_delay_from_earth_center(ra, dec, tcave)
 
+            # time delay from geocenter to the frame tc is sampled in
+            refframe = self.tc_ref_frame
+            if refframe == "geocentric":
+                dtref = numpy.zeros(len(ra))
+            else:
+                dtref = Detector(refframe, reference_time=tcave)
+                dtref = dtref.time_delay_from_earth_center(ra, dec, tcave)
+
             dmap = {}
-            for i, t in enumerate(tqdm.tqdm(zip(*dts))):
+            for i, t in enumerate(tqdm.tqdm(zip(*dts, strict=True))):
                 if t not in dmap:
                     dmap[t] = []
                 dmap[t].append(i)
@@ -503,7 +538,7 @@ class DistMarg:
             # Sky prior by bin
             bin_prior = {t: len(dmap[t]) / size for t in dmap}
 
-            return dmap, tcmin, tcmax, fp, fc, ra, dec, dtc, bin_prior
+            return dmap, tcmin, tcmax, fp, fc, ra, dec, dtc, dtref, bin_prior
 
         if not hasattr(self, "tinfo"):
             self.tinfo = {}
@@ -512,7 +547,7 @@ class DistMarg:
             logger.info("pregenerating sky pointings")
             self.tinfo[ikey] = make_init()
 
-        dmap, tcmin, tcmax, fp, fc, ra, dec, dtc, bin_prior = self.tinfo[ikey]
+        (dmap, tcmin, tcmax, fp, fc, ra, dec, dtc, dtref, bin_prior) = self.tinfo[ikey]
 
         # draw times from each snr time series
         # Is it worth doing this if some detector has low SNR?
@@ -523,7 +558,8 @@ class DistMarg:
         mcweight = None
         for ifo in ifos:
             snr = snrs[ifo]
-            tmin, tmax = tcmin - EARTH_RADIUS, tcmax + EARTH_RADIUS
+            pad = self.tc_window_padding
+            tmin, tmax = tcmin - pad, tcmax + pad
             if hasattr(self, "tstart"):
                 tmin = self.tstart[ifo]
                 tmax = self.tend[ifo]
@@ -534,6 +570,10 @@ class DistMarg:
 
             w = snr.squared_norm().numpy() / 2.0
             i = draw_sample(w, size=vsamples)
+            # the times are drawn from this detector's series in proportion
+            # to its likelihood, so normalizing over that series gives the
+            # probability they were drawn with
+            w -= logsumexp(w)
 
             if sref is not None:
                 mcweight += w[i]
@@ -546,7 +586,6 @@ class DistMarg:
                 mcweight = w[i]
 
             idx.append(i)
-        mcweight -= logsumexp(mcweight)
 
         # check if delay is in dict, if not, throw out
         ti = []
@@ -577,6 +616,7 @@ class DistMarg:
         ra = ra[ix]
         dec = dec[ix]
         dtc = {ifo: dtc[ifo][ix] for ifo in dtc}
+        dtref = dtref[ix]
 
         ti = numpy.resize(numpy.array(ti, dtype=int), vsamples)
         wi = numpy.resize(numpy.array(wi), vsamples)
@@ -584,12 +624,27 @@ class DistMarg:
         # Second draw a subsample size offset so that all times are covered
         tct = numpy.random.uniform(-snr.delta_t / 2.0, snr.delta_t / 2.0, size=len(ti))
 
-        tc = tct + iref[ti] * snr.delta_t + float(sref.start_time) - dtc[ifos[0]]
+        # convert from the reference ifo's time to the frame tc is sampled in
+        tc = (
+            tct + iref[ti] * snr.delta_t + float(sref.start_time) - dtc[ifos[0]] + dtref
+        )
 
-        # Update the current proposed times and the marginalization values
-        # There's an overall normalization here which may introduce a constant
-        # factor at the moment.
-        logw_sky = -mcweight[ti] + numpy.log(wi) - numpy.log(resize_factor)
+        # Update the current proposed times and the marginalization values.
+        # The points are drawn from the incoherent likelihood, not from the
+        # prior, so each carries the ratio of the two. mcweight is a
+        # probability per time sample per sky bin: the sample spacing and
+        # the bin's share of the sky prior turn it into a density the tc
+        # prior can be divided by. Refilling to vsamples after dropping the
+        # draws that fell in an empty bin makes the sum an average over the
+        # ones kept, so the fraction kept multiplies back in. Assumes a
+        # uniform tc prior.
+        logw_sky = (
+            -mcweight[ti]
+            + numpy.log(wi)
+            + numpy.log(sref.delta_t / (tcmax - tcmin))
+            + numpy.log(resize_factor)
+        )
+        logw_sky[(tc < tcmin) | (tc > tcmax)] = -numpy.inf
 
         self.marginalize_vector_params["tc"] = tc
         self.marginalize_vector_params["ra"] = ra
@@ -669,8 +724,9 @@ class DistMarg:
             return
 
         tcmin, tcmax = self.marginalized_vector_priors["tc"].bounds["tc"]
-        tstart = tcmin - EARTH_RADIUS
-        tmax = tcmax - tcmin + EARTH_RADIUS * 2.0
+        pad = self.tc_window_padding
+        tstart = tcmin - pad
+        tmax = tcmax - tcmin + pad * 2.0
         num_samples = int(tmax * sample_rate)
         self.tstart = dict.fromkeys(self.data, tstart)
         self.num_samples = dict.fromkeys(self.data, num_samples)
@@ -853,8 +909,8 @@ class DistMarg:
         psnrs = []
         for ifo in ifos:
             snr = snrs[ifo]
-            start = max(tcmin - EARTH_RADIUS, snr.start_time)
-            end = min(tcmax + EARTH_RADIUS, snr.end_time)
+            start = max(tcmin - self.tc_window_padding, snr.start_time)
+            end = min(tcmax + self.tc_window_padding, snr.end_time)
             snr = snr.time_slice(start, end, mode="nearest")
             psnr = abs(snr).max()
             if psnr > peak_snr_threshold:
@@ -891,8 +947,16 @@ class DistMarg:
         for k in self.marginalize_vector_params:
             if k not in params:
                 params[k] = self.marginalize_vector_params[k]
-        self.marginalize_vector_weights = -numpy.log(self.vsamples)
         return params
+
+    def update(self, **params):
+        """Move to a new point, resetting the marginalization weights.
+
+        The weights start out equal and each draw adds to them. They are
+        reset here, once per point.
+        """
+        super().update(**params)
+        self.marginalize_vector_weights = -numpy.log(self.vsamples)
 
     def reconstruct(self, rec=None, seed=None, set_loglr=None):
         """
@@ -1119,10 +1183,7 @@ def marginalize_likelihood(
         )
 
     if logw is None:
-        if isinstance(hh, float):
-            logw = 0
-        else:
-            logw = -numpy.log(len(sh))
+        logw = 0 if isinstance(hh, float) else -numpy.log(len(sh))
 
     if return_complex:
         pass

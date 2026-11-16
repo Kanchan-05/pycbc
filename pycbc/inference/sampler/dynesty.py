@@ -271,7 +271,7 @@ class DynestySampler(BaseSampler):
 
     @property
     def niterations(self):
-        return len(tuple(self.samples.values())[0])
+        return len(next(iter(self.samples.values())))
 
     @classmethod
     def from_config(
@@ -507,8 +507,7 @@ class DynestySampler(BaseSampler):
             self.set_state_from_file(self.checkpoint_file)
             logger.info("Found valid checkpoint file: %s", self.checkpoint_file)
         except Exception as e:
-            print(e)
-            logger.info("Failed to load checkpoint file")
+            logger.info("Failed to load checkpoint file: %s", e)
 
     def set_state_from_file(self, filename):
         """Sets the state of the sampler back to the instance saved in a file."""

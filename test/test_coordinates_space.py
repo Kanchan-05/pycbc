@@ -180,10 +180,7 @@ class TestParams(unittest.TestCase):
                 passed, maxdiff, maxidx = almost_equal(
                     derived_val, check_val, self.precision
                 )
-                if not passed:
-                    failinputs = [p[maxidx] for p in args]
-                else:
-                    failinputs = None
+                failinputs = [p[maxidx] for p in args] if not passed else None
                 self.assertTrue(passed, msg.format(func, compval, maxdiff, failinputs))
 
     def test_polarization(self):
@@ -209,7 +206,7 @@ class TestParams(unittest.TestCase):
                 return False
 
         def strain_generator(
-            det="D1",
+            det="D1",  # noqa: ARG001
             model="IMRPhenomD",
             fs=4096,
             df=None,
@@ -217,7 +214,7 @@ class TestParams(unittest.TestCase):
             fref=2,
             tc=0,
             params=None,
-            fd_taper=False,
+            fd_taper=False,  # noqa: ARG001
         ):
 
             # Generate a waveform at the detector-frame. Use the same
@@ -262,9 +259,7 @@ class TestParams(unittest.TestCase):
 
             # Not take the rotation of the earth into account.
             ht_1 = fp_1 * hp + fc_1 * hc
-            ht_list = [ht_1]
-
-            return ht_list
+            return [ht_1]
 
         # Checking if bbhx is installed, if not, then ignore this test
         # and raise a warning.

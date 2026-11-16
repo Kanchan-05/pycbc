@@ -23,7 +23,6 @@
 #
 # GPU kernel notation (N is the correlation length passed to the kernels,
 # BS a block size).
-# ruff: noqa: N803, N806
 import numpy
 import pycuda.driver
 import pycuda.gpuarray
@@ -263,7 +262,7 @@ def get_cached_bin_layout(bins):
         else:
             k = list(numpy.arange(s, e, BS / 2))
             kmin += k
-            kmax += k[1:] + [e]
+            kmax += [*k[1:], e]
             bv += [i] * len(k)
     bv = pycuda.gpuarray.to_gpu_async(numpy.array(bv, dtype=numpy.uint32))
     kmin = pycuda.gpuarray.to_gpu_async(numpy.array(kmin, dtype=numpy.uint32))
@@ -272,7 +271,6 @@ def get_cached_bin_layout(bins):
 
 
 def shift_sum_points(num, N, arg_tuple):
-    # fuse = 'fuse' in corr.gpu_callback_method
     fuse = False
 
     fn, nt = get_pchisq_fn(num, fuse_correlate=fuse)
@@ -282,11 +280,15 @@ def shift_sum_points(num, N, arg_tuple):
         args += [corr.htilde.data.gpudata, corr.stilde.data.gpudata]
     else:
         args += [corr.data.gpudata]
-    args += (
-        [outp.gpudata, N]
-        + phase[0:num]
-        + [kmin.gpudata, kmax.gpudata, bv.gpudata, nbins]
-    )
+    args += [
+        outp.gpudata,
+        N,
+        *phase[0:num],
+        kmin.gpudata,
+        kmax.gpudata,
+        bv.gpudata,
+        nbins,
+    ]
     fn.prepared_call(*args)
     outp = outp[num * nbins :]
     phase = phase[num:]
@@ -295,7 +297,6 @@ def shift_sum_points(num, N, arg_tuple):
 
 
 def shift_sum_points_pow2(num, arg_tuple):
-    # fuse = 'fuse' in corr.gpu_callback_method
     fuse = False
 
     fn, nt = get_pchisq_fn_pow2(num, fuse_correlate=fuse)
@@ -306,11 +307,15 @@ def shift_sum_points_pow2(num, arg_tuple):
         args += [corr.htilde.data.gpudata, corr.stilde.data.gpudata]
     else:
         args += [corr.data.gpudata]
-    args += (
-        [outp.gpudata, N]
-        + points[0:num]
-        + [kmin.gpudata, kmax.gpudata, bv.gpudata, nbins]
-    )
+    args += [
+        outp.gpudata,
+        N,
+        *points[0:num],
+        kmin.gpudata,
+        kmax.gpudata,
+        bv.gpudata,
+        nbins,
+    ]
     fn.prepared_call(*args)
     outp = outp[num * nbins :]
     points = points[num:]
@@ -327,7 +332,7 @@ def get_cached_pow2(N):
     return _pow2_cache[N]
 
 
-def shift_sum(corr, points, bins):
+def shift_sum(corr, points, bins, weights=None):
     kmin, kmax, bv = get_cached_bin_layout(bins)
     nb = len(kmin)
     N = numpy.uint32(len(corr))
@@ -365,4 +370,7 @@ def shift_sum(corr, points, bins):
                 outp, phase, np = shift_sum_points(1, cargs)  # pylint:disable=no-value-for-parameter
 
     o = outc.get()
-    return (o.conj() * o).sum(axis=1).real
+    power = (o.conj() * o).real
+    if weights is not None:
+        power = power * weights
+    return power.sum(axis=1)

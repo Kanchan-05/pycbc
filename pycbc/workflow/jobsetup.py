@@ -28,12 +28,13 @@ and add jobs/nodes to a pycbc workflow. For details about pycbc.workflow see:
 https://ldas-jobs.ligo.caltech.edu/~cbc/docs/pycbc/ahope.html
 """
 
+import itertools
 import math
 import os
 
 import igwn_segments as segments
 
-from pycbc.workflow.core import Executable, File, FileList, Node
+from pycbc.workflow.core import Executable, File, FileList, Node, resolve_td_option
 
 
 def int_gps_time_to_str(t):
@@ -217,33 +218,28 @@ def sngl_ifo_job_setup(
         workflow.
 
     """
-    ########### (1) ############
-    # Get the times that can be analysed and needed data lengths
+    # Step 1: get the times that can be analysed and needed data lengths
     data_length, valid_chunk, valid_length = identify_needed_data(curr_exe_job)
 
     exe_tags = curr_exe_job.tags
     # Loop over science segments and set up jobs
     for curr_seg in science_segs:
-        ########### (2) ############
-        # Initialize the class that identifies how many jobs are needed and the
-        # shift between them.
+        # Step 2: initialize the class that identifies how many jobs are needed
+        # and the shift between them.
         segmenter = JobSegmenter(
             data_length, valid_chunk, valid_length, curr_seg, curr_exe_job
         )
 
         for job_num in range(segmenter.num_jobs):
-            ############## (3) #############
-            # Figure out over what times this job will be valid for
+            # Step 3: figure out over what times this job will be valid for
             job_valid_seg = segmenter.get_valid_times_for_job(
                 job_num, allow_overlap=allow_overlap
             )
 
-            ############## (4) #############
-            # Get the data that this job should read in
+            # Step 4: get the data that this job should read in
             job_data_seg = segmenter.get_data_times_for_job(job_num)
 
-            ############# (5) ############
-            # Identify parents/inputs to the job
+            # Step 5: identify parents/inputs to the job
             if parents:
                 # Find the set of files with the best overlap
                 curr_parent = parents.find_outputs_in_range(
@@ -273,8 +269,7 @@ def sngl_ifo_job_setup(
                     err_str += "\nThis shouldn't happen. Contact a developer."
                     raise ValueError(err_str)
 
-            ############## (6) #############
-            # Make node and add to workflow
+            # Step 6: make node and add to workflow
 
             # Note if I have more than one curr_parent I need to make more than
             # one job. If there are no curr_parents it is set to [None] and I
@@ -300,13 +295,173 @@ def sngl_ifo_job_setup(
     return out_files
 
 
+def multi_ifo_job_setup(
+    workflow,
+    ifos,
+    out_files,
+    exe_class,
+    science_segs,
+    datafind_outs,
+    output_dir,
+    injection_file=None,
+    parents=None,
+    tags=None,
+):
+    """
+    Set up matched-filtering jobs where a single job can analyze multiple
+    detectors simultaneously without losing any single-detector analyzable
+    time at segment boundaries.
+
+    Valid trigger segments are first computed per detector using the same
+    padding and minimum data length rules as ``sngl_ifo_job_setup``. The
+    union of valid trigger times is then partitioned across detector state
+    transitions so that every detector's valid trigger segments are completely
+    and disjointly covered while each job's data segment lies within the
+    supporting science segment of every active detector in that job.
+    """
+    if tags is None:
+        tags = []
+    ifos = sorted(ifos)
+    if not ifos:
+        return out_files
+
+    job_instances = {}
+
+    def get_job_instance(active_ifos):
+        key = tuple(active_ifos)
+        if key not in job_instances:
+            job_instances[key] = exe_class(
+                workflow.cp,
+                "inspiral",
+                ifo=list(active_ifos),
+                out_dir=output_dir,
+                injection_file=injection_file,
+                tags=tags,
+            )
+        return job_instances[key]
+
+    data_lengths, valid_chunks, valid_lengths = identify_needed_data(
+        get_job_instance(ifos)
+    )
+    if not data_lengths:
+        return out_files
+
+    min_idx = min(range(len(data_lengths)), key=lambda i: data_lengths[i])
+    min_data_length = data_lengths[min_idx]
+    left_pad = valid_chunks[min_idx][0]
+    right_pad = data_lengths[min_idx] - valid_chunks[min_idx][1]
+    max_valid_length = max(valid_lengths)
+
+    # Determine valid trigger segments and supporting science segments per IFO
+    ifo_valid_sci = {}
+    bounds = set()
+    for ifo in ifos:
+        ifo_valid_sci[ifo] = []
+        for sci_seg in science_segs[ifo]:
+            if abs(sci_seg) >= min_data_length:
+                v_seg = segments.segment(sci_seg[0] + left_pad, sci_seg[1] - right_pad)
+                ifo_valid_sci[ifo].append((v_seg, sci_seg))
+                bounds.update(v_seg)
+
+    # Partition the union of valid times at detector state transitions
+    for b_start, b_end in itertools.pairwise(sorted(bounds)):
+        valid_slice = segments.segment(b_start, b_end)
+        sci_map = {
+            ifo: sci_seg
+            for ifo in ifos
+            for v_seg, sci_seg in ifo_valid_sci[ifo]
+            if valid_slice in v_seg
+        }
+        if not sci_map:
+            continue
+
+        # Group active IFOs so each group's common science segment has length
+        # >= min_data_length.
+        groups = []
+        for ifo, s_ifo in sci_map.items():
+            for idx, (grp_ifos, grp_sci) in enumerate(groups):
+                common_sci = grp_sci & s_ifo
+                if abs(common_sci) >= min_data_length:
+                    grp_ifos.append(ifo)
+                    groups[idx] = (grp_ifos, common_sci)
+                    break
+            else:
+                groups.append(([ifo], s_ifo))
+
+        slice_len = abs(valid_slice)
+        num_jobs = math.ceil(slice_len / float(max_valid_length))
+        for grp_ifos, common_sci_seg in groups:
+            curr_exe_job = get_job_instance(grp_ifos)
+            exe_tags = list(curr_exe_job.tags)
+            for job_num in range(num_jobs):
+                v_start = valid_slice[0] + round(job_num * slice_len / num_jobs)
+                v_end = valid_slice[0] + round((job_num + 1) * slice_len / num_jobs)
+                job_valid_seg = segments.segment(v_start, v_end)
+                job_data_seg = segments.segment(v_start - left_pad, v_end + right_pad)
+                if abs(job_data_seg) < min_data_length:
+                    d_start = min(job_data_seg[0], common_sci_seg[1] - min_data_length)
+                    job_data_seg = segments.segment(d_start, d_start + min_data_length)
+                if hasattr(curr_exe_job, "zero_pad_data_extend"):
+                    job_data_seg = curr_exe_job.zero_pad_data_extend(
+                        job_data_seg, common_sci_seg
+                    )
+
+                if parents:
+                    curr_parent = parents.find_outputs_in_range(
+                        grp_ifos[0], job_valid_seg, use_split_lists=True
+                    )
+                    if not curr_parent:
+                        err_string = (
+                            f"No parent jobs found overlapping "
+                            f"{job_valid_seg[0]} to {job_valid_seg[1]}.\n"
+                            "This is a bad error! Contact a developer."
+                        )
+                        raise ValueError(err_string)
+                else:
+                    curr_parent = [None]
+
+                curr_dfouts = None
+                if datafind_outs:
+                    curr_dfouts = FileList([])
+                    for ifo in grp_ifos:
+                        ifo_dfouts = datafind_outs.find_all_output_in_range(
+                            ifo, job_data_seg, use_split_lists=True
+                        )
+                        if not ifo_dfouts:
+                            err_str = (
+                                f"No datafind jobs found for {ifo} overlapping "
+                                f"{job_data_seg[0]} to {job_data_seg[1]}.\n"
+                                "This shouldn't happen. Contact a developer."
+                            )
+                            raise ValueError(err_str)
+                        curr_dfouts.extend(ifo_dfouts)
+
+                for parent in curr_parent:
+                    if len(curr_parent) != 1:
+                        bank_tag = [t for t in parent.tags if "bank" in t.lower()]
+                        curr_exe_job.update_current_tags(bank_tag + exe_tags)
+                    node = curr_exe_job.create_node(
+                        job_data_seg,
+                        job_valid_seg,
+                        parent=parent,
+                        df_parents=curr_dfouts,
+                    )
+                    workflow.add_node(node)
+                    out_files += [
+                        i for i in node.output_files if "PSD_FILE" not in i.tags
+                    ]
+
+    return out_files
+
+
+# science_segs and output_dir are unused; the signature matches sngl_ifo_job_setup
 def multi_ifo_coherent_job_setup(
     workflow,
     out_files,
     curr_exe_job,
-    science_segs,
+    science_segs,  # noqa: ARG001
     datafind_outs,
-    output_dir,
+    output_dir,  # noqa: ARG001
     parents=None,
     slide_dict=None,
     tags=None,
@@ -519,16 +674,14 @@ class JobSegmenter:
         shift_dur = self.curr_seg[0] + int(self.job_time_shift * num_job + 0.0001)
         job_data_seg = self.data_chunk.shift(shift_dur)
         # Sanity check that all data is used
-        if num_job == 0:
-            if job_data_seg[0] != self.curr_seg[0]:
-                err = "Job is not using data from the start of the "
-                err += "science segment. It should be using all data."
-                raise ValueError(err)
-        if num_job == (self.num_jobs - 1):
-            if job_data_seg[1] != self.curr_seg[1]:
-                err = "Job is not using data from the end of the "
-                err += "science segment. It should be using all data."
-                raise ValueError(err)
+        if num_job == 0 and job_data_seg[0] != self.curr_seg[0]:
+            err = "Job is not using data from the start of the "
+            err += "science segment. It should be using all data."
+            raise ValueError(err)
+        if num_job == (self.num_jobs - 1) and job_data_seg[1] != self.curr_seg[1]:
+            err = "Job is not using data from the end of the "
+            err += "science segment. It should be using all data."
+            raise ValueError(err)
 
         if hasattr(self.exe_class, "zero_pad_data_extend"):
             job_data_seg = self.exe_class.zero_pad_data_extend(
@@ -568,6 +721,7 @@ class PyCBCInspiralExecutable(Executable):
         self.cp = cp
         self.injection_file = injection_file
         self.ext = ".hdf"
+        self.zero_padding = self.has_opt("allow-zero-padding")
 
         self.num_threads = 1
         if self.get_opt("processing-scheme") is not None:
@@ -616,10 +770,39 @@ class PyCBCInspiralExecutable(Executable):
         data_seg = segments.segment([int(data_seg[0]), int(data_seg[1])])
         fil.add_metadata("data_seg", data_seg)
         node.add_input_opt("--bank-file", parent)
+
+        if self.ifo_list and not self.has_opt("channel-name"):
+            channels = []
+            for ifo in self.ifo_list:
+                cname = self._get_ifo_opt(ifo, "channel-name")
+                if cname:
+                    cname = resolve_td_option(cname, valid_seg)
+                    channels.append(cname if ":" in cname else f"{ifo}:{cname}")
+            if channels:
+                node.add_opt("--channel-name", " ".join(channels))
+
         if df_parents is not None:
-            node.add_input_list_opt("--frame-files", df_parents)
+            is_multi = (self.ifo_list and len(self.ifo_list) > 1) or (
+                self.cp.has_option_tags(
+                    "workflow-matchedfilter", "matchedfilter-method", self.tags
+                )
+                and self.cp.get_opt_tags(
+                    "workflow-matchedfilter", "matchedfilter-method", self.tags
+                )
+                == "WORKFLOW_MULTIPLE_IFOS"
+            )
+            if is_multi:
+                node.add_multiifo_input_list_opt("--frame-files", df_parents)
+            else:
+                node.add_input_list_opt("--frame-files", df_parents)
 
         return node
+
+    def _get_ifo_opt(self, ifo, opt):
+        for sec, name in [(self.name, opt), ("workflow", f"{ifo.lower()}-{opt}")]:
+            if self.cp.has_option_tags(sec, name, [*self.tags, ifo]):
+                return self.cp.get_opt_tags(sec, name, [*self.tags, ifo]).strip()
+        return None
 
     def get_valid_times(self):
         """Determine possible dimensions of needed input and valid output"""
@@ -628,7 +811,7 @@ class PyCBCInspiralExecutable(Executable):
                 self.cp.get("workflow-matchedfilter", "min-analysis-segments")
             )
         else:
-            min_analysis_segs = 0
+            min_analysis_segs = 1
 
         if self.cp.has_option("workflow-matchedfilter", "max-analysis-segments"):
             max_analysis_segs = int(
@@ -668,8 +851,6 @@ class PyCBCInspiralExecutable(Executable):
         #       pad take normal values. When using zero-padding this data will
         #       be used for SNR generation.
 
-        # if self.has_opt('taper-data'):
-        #    pad_data += int(self.get_opt( 'taper-data' ))
         if self.has_opt("allow-zero-padding"):
             self.zero_padding = True
         else:
@@ -695,8 +876,9 @@ class PyCBCInspiralExecutable(Executable):
                 continue
             if data_length < min_analysis_length:
                 continue
-            data_lengths += [data_length]
-            valid_regions += [segments.segment(start, end)]
+            if end > start:
+                data_lengths += [data_length]
+                valid_regions += [segments.segment(start, end)]
         # If min_analysis_length is given, ensure that it is added as an option
         # for job analysis length.
         if min_analysis_length:
@@ -727,8 +909,7 @@ class PyCBCInspiralExecutable(Executable):
         end_pad = int(self.get_opt("segment-end-pad"))
         new_data_start = max(curr_seg[0], job_data_seg[0] - start_pad)
         new_data_end = min(curr_seg[1], job_data_seg[1] + end_pad)
-        new_data_seg = segments.segment([new_data_start, new_data_end])
-        return new_data_seg
+        return segments.segment([new_data_start, new_data_end])
 
 
 # FIXME: This is probably misnamed, this is really GRBInspiralExectuable.
@@ -743,15 +924,16 @@ class PyCBCMultiInspiralExecutable(Executable):
     current_retention_level = Executable.ALL_TRIGGERS
 
     # bank-veto-bank-file is a file input option for pycbc_multi_inspiral
-    file_input_options = Executable.file_input_options + ["--bank-veto-bank-file"]
+    file_input_options = [*Executable.file_input_options, "--bank-veto-bank-file"]
 
+    # gate_files is unused, but kept so that existing calls keep working
     def __init__(
         self,
         cp,
         name,
         ifo=None,
         injection_file=None,
-        gate_files=None,
+        gate_files=None,  # noqa: ARG002
         out_dir=None,
         tags=None,
     ):
@@ -781,7 +963,11 @@ class PyCBCMultiInspiralExecutable(Executable):
             tags = []
         node = Node(self)
 
-        if not df_parents:
+        if not (
+            df_parents
+            or self.has_opt("frame-files")
+            or self.has_opt("frame-cache")
+        ):
             raise ValueError(f"{self.name} must be supplied with frame or cache files")
 
         # If doing single IFO search, make sure slides are disabled
@@ -824,7 +1010,7 @@ class PyCBCMultiInspiralExecutable(Executable):
             parent,
         )
 
-        if df_parents is not None:
+        if df_parents:
             frame_arg = "--frame-files"
             for frame_file in df_parents:
                 frame_arg += f" {frame_file.ifo}:{frame_file.name}"
@@ -911,7 +1097,7 @@ class PyCBCTmpltbankExecutable(Executable):
         self.write_psd = write_psd
         self.psd_files = psd_files
 
-    def create_node(self, data_seg, valid_seg, parent=None, df_parents=None, tags=None):
+    def create_node(self, data_seg, valid_seg, parent=None, df_parents=None, tags=None):  # noqa: ARG002
         if tags is None:
             tags = []
         node = Node(self)
@@ -937,7 +1123,7 @@ class PyCBCTmpltbankExecutable(Executable):
                 valid_seg,
                 ".txt",
                 "--psd-output",
-                tags=tags + ["PSD_FILE"],
+                tags=[*tags, "PSD_FILE"],
                 store_file=self.retain_files,
             )
         node.new_output_file_opt(
@@ -978,7 +1164,7 @@ class PyCBCTmpltbankExecutable(Executable):
                 valid_seg,
                 ".txt",
                 "--psd-output",
-                tags=tags + ["PSD_FILE"],
+                tags=[*tags, "PSD_FILE"],
                 store_file=self.retain_files,
             )
 
@@ -1061,15 +1247,12 @@ class PycbcSplitInspinjExecutable(Executable):
 
         node.add_input_opt("--input-file", parent)
 
-        if parent.name.endswith("gz"):
-            ext = ".xml.gz"
-        else:
-            ext = ".xml"
+        ext = ".xml.gz" if parent.name.endswith("gz") else ".xml"
 
         out_files = FileList([])
         for i in range(self.num_splits):
             curr_tag = f"split{i}"
-            curr_tags = parent.tags + [curr_tag]
+            curr_tags = [*parent.tags, curr_tag]
             job_tag = parent.description + "_" + self.name.upper()
             out_file = File(
                 parent.ifo_list,
@@ -1191,7 +1374,7 @@ class PycbcSplitBankExecutable(Executable):
             curr_tag = (f"bank%0{n_dp}d") % (i)
             # FIXME: What should the tags actually be? The job.tags values are
             #        currently ignored.
-            curr_tags = bank.tags + [curr_tag] + tags
+            curr_tags = [*bank.tags, curr_tag, *tags]
             job_tag = bank.description + "_" + self.name.upper()
             out_file = File(
                 bank.ifo_list,
@@ -1347,12 +1530,6 @@ class PycbcInferenceExecutable(Executable):
             err_msg = "This is not yet supported/tested with pegasus 5. "
             err_msg += "Please reimplement this (with unittest :-) )."
             raise ValueError(err_msg)
-            # ckpt_file_name = "{}.checkpoint".format(inference_file.name)
-            # ckpt_file = dax.File(ckpt_file_name)
-            # DO NOT call pegasus API stuff outside of
-            # pegasus_workflow.py.
-            # node._dax_node.uses(ckpt_file, link=dax.Link.OUTPUT,
-            #                    register=False, transfer=False)
 
         return node, inference_file
 
@@ -1374,7 +1551,7 @@ class PycbcHDFSplitInjExecutable(Executable):
         out_files = FileList([])
         for i in range(self.num_splits):
             curr_tag = f"split{i}"
-            curr_tags = parent.tags + [curr_tag]
+            curr_tags = [*parent.tags, curr_tag]
             job_tag = parent.description + "_" + self.name.upper()
             out_file = File(
                 parent.ifo_list,

@@ -45,7 +45,7 @@ def keep_ind(times, start, end):
     leftidx = numpy.searchsorted(times, start, side="left")
     rightidx = numpy.searchsorted(times, end, side="right")
 
-    for li, ri in zip(leftidx, rightidx):
+    for li, ri in zip(leftidx, rightidx, strict=True):
         seg_indices = numpy.arange(li, ri, 1).astype(numpy.uint32)
         indices = numpy.union1d(seg_indices, indices)
     return time_sorting[indices]
@@ -106,7 +106,9 @@ init_logging(args.verbose)
 fo = HFile(args.output_file, "w")
 
 injection_index = 0
-for trigger_file, injection_file in zip(args.trigger_files, args.injection_files):
+for trigger_file, injection_file in zip(
+    args.trigger_files, args.injection_files, strict=True
+):
     logger.info("Read in the coinc data: %s", trigger_file)
     f = HFile(trigger_file, "r")
 
@@ -142,7 +144,10 @@ for trigger_file, injection_file in zip(args.trigger_files, args.injection_files
         time_dict[ifo] = f[f"foreground/{ifo}/time"][:]
         trig_dict[ifo] = f[f"foreground/{ifo}/trigger_id"][:]
     time = numpy.array(
-        [events.mean_if_greater_than_zero(vals)[0] for vals in zip(*ifo_times)]
+        [
+            events.mean_if_greater_than_zero(vals)[0]
+            for vals in zip(*ifo_times, strict=True)
+        ]
     )
     # We will discard injections which cannot be associated with a
     # coincident event, thus combine segments over all combinations
@@ -305,27 +310,24 @@ for trigger_file, injection_file in zip(args.trigger_files, args.injection_files
             hdf_append(fo, f"injections/{k}", data)
 
     # copy over common search info
-    if "foreground_time" in f.attrs.keys():
+    if "foreground_time" in f.attrs:
         fo.attrs["foreground_time"] = f.attrs["foreground_time"]
-    if "foreground_time_exc" in f.attrs.keys():
+    if "foreground_time_exc" in f.attrs:
         fo.attrs["foreground_time_exc"] = f.attrs["foreground_time_exc"]
 
-    for key in f["segments"].keys():
+    for key in f["segments"]:
         if "foreground" in key or "coinc" in key:
             continue
         if key not in fo:
             fo.create_group(key)
-        if key in f:
-            fkey = f[key]
-        else:
-            fkey = f
+        fkey = f.get(key, f)
         if "pivot" in fo[key].attrs:
             # This is a coincident statmap file
             fo[key].attrs["pivot"] = fkey.attrs["pivot"]
             fo[key].attrs["fixed"] = fkey.attrs["fixed"]
-        if "foreground_time" in fkey.attrs.keys():
+        if "foreground_time" in fkey.attrs:
             fo[key].attrs["foreground_time"] = fkey.attrs["foreground_time"]
-        if "foreground_time_exc" in fkey.attrs.keys():
+        if "foreground_time_exc" in fkey.attrs:
             fo[key].attrs["foreground_time_exc"] = fkey.attrs["foreground_time_exc"]
 
     hdf_append(fo, "missed/all", missed + injection_index)

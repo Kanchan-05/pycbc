@@ -202,10 +202,7 @@ if args.gating_veto_windows:
     if not (gveto_before == 0 and gveto_after == 0):
         gate_group = f[args.instrument + "/gating/"]
         autogate_times = numpy.unique(gate_group["auto/time"][:])
-        if "file" in gate_group:
-            detgate_times = gate_group["file/time"][:]
-        else:
-            detgate_times = []
+        detgate_times = gate_group["file/time"][:] if "file" in gate_group else []
         gate_times = numpy.concatenate((autogate_times, detgate_times))
         gveto_idx = veto.indices_within_times(
             trigs.end_time, gate_times + gveto_before, gate_times + gveto_after
@@ -317,7 +314,7 @@ for rank, num_event in enumerate(order):
             args.output_dir,
             args.instrument,
             statfiles=statfiles,
-            tags=args.tags + [str(rank)],
+            tags=[*args.tags, str(rank)],
         ),
     )
     files += mini.make_trigger_timeseries(
@@ -326,7 +323,7 @@ for rank, num_event in enumerate(order):
         ifo_time,
         args.output_dir,
         special_tids=ifo_tid,
-        tags=args.tags + [str(rank)],
+        tags=[*args.tags, str(rank)],
     )
     curr_params = {}
     curr_params["mass1"] = trigs.mass1[num_event]
@@ -365,7 +362,7 @@ for rank, num_event in enumerate(order):
         curr_params,
         args.output_dir,
         data_segments={args.instrument: insp_data_seglists},
-        tags=args.tags + [str(rank)],
+        tags=[*args.tags, str(rank)],
     )
 
     files += sngl_plot
@@ -375,7 +372,7 @@ for rank, num_event in enumerate(order):
         curr_params,
         args.output_dir,
         [args.instrument],
-        tags=args.tags + [str(rank)],
+        tags=[*args.tags, str(rank)],
     )
 
     files += mini.make_singles_timefreq(
@@ -385,7 +382,7 @@ for rank, num_event in enumerate(order):
         time,
         args.output_dir,
         data_segments=insp_data_seglists,
-        tags=args.tags + [str(rank)],
+        tags=[*args.tags, str(rank)],
         ifo=args.instrument,
     )
 
@@ -395,7 +392,7 @@ for rank, num_event in enumerate(order):
         time,
         args.output_dir,
         data_segments=insp_data_seglists,
-        tags=args.tags + [str(rank)],
+        tags=[*args.tags, str(rank)],
     )
 
     layouts += list(layout.grouper(files, 2))

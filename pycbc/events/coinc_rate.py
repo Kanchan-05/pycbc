@@ -44,7 +44,7 @@ def multiifo_noise_lograte(log_rates, slop):
     expected_log_rates = {}
 
     # Order of ifos must be stable in output dict keys, so sort them
-    ifos = sorted(list(log_rates.keys()))
+    ifos = sorted(log_rates.keys())
     ifostring = " ".join(ifos)
 
     # Calculate coincidence for all-ifo combination
@@ -123,7 +123,6 @@ def combination_noise_lograte(log_rates, slop, dets=None):
     """
     # multiply product of trigger rates by the overlap time
     allowed_area = multiifo_noise_coincident_area(list(log_rates), slop, dets=dets)
-    # list(dict.values()) is python-3-proof
     rateprod = numpy.sum(list(log_rates.values()), axis=0)
     return numpy.log(allowed_area) + rateprod
 

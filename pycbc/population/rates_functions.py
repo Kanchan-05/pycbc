@@ -63,7 +63,8 @@ def process_full_data(fname, rhomin, mass1, mass2, lo_mchirp, hi_mchirp):
     }
 
 
-def save_bkg_falloff(fname_statmap, fname_bank, path, rhomin, lo_mchirp, hi_mchirp):
+# path is unused, but kept so that existing calls keep working
+def save_bkg_falloff(fname_statmap, fname_bank, path, rhomin, lo_mchirp, hi_mchirp):  # noqa: ARG001
     """
     Read the STATMAP files to derive snr falloff for the background events.
     Save the output to a txt file
@@ -224,16 +225,14 @@ def skew_lognormal_samples(alpha, mu, sigma, minrp, maxrp):
     maxp = max(plRu)
     idx = np.where(plRu / maxp > rndn)
     log_Rf = lRu[idx]
-    Rfs = np.exp(log_Rf)
-
-    return Rfs
+    return np.exp(log_Rf)
 
 
 # The flat in log and power-law mass distribution models  #
 
 
 # PDF for the two canonical models plus flat in mass model
-def prob_lnm(m1, m2, s1z, s2z, **kwargs):
+def prob_lnm(m1, m2, s1z, s2z, **kwargs):  # noqa: ARG001
     """
     Return probability density for uniform in log
 
@@ -279,7 +278,7 @@ def prob_lnm(m1, m2, s1z, s2z, **kwargs):
     return p_m1_m2
 
 
-def prob_imf(m1, m2, s1z, s2z, **kwargs):
+def prob_imf(m1, m2, s1z, s2z, **kwargs):  # noqa: ARG001
     """
     Return probability density for power-law
 
@@ -329,7 +328,7 @@ def prob_imf(m1, m2, s1z, s2z, **kwargs):
     return p_m1_m2 / 2.0
 
 
-def prob_flat(m1, m2, s1z, s2z, **kwargs):
+def prob_flat(m1, m2, s1z, s2z, **kwargs):  # noqa: ARG001
     """
     Return probability density for uniform in component mass
 
@@ -482,9 +481,7 @@ def mchirp_sampler_lnm(**kwargs):
 
     """
     m1, m2 = draw_lnm_samples(**kwargs)
-    mchirp_astro = mchirp_from_mass1_mass2(m1, m2)
-
-    return mchirp_astro
+    return mchirp_from_mass1_mass2(m1, m2)
 
 
 def mchirp_sampler_imf(**kwargs):
@@ -503,9 +500,7 @@ def mchirp_sampler_imf(**kwargs):
 
     """
     m1, m2 = draw_imf_samples(**kwargs)
-    mchirp_astro = mchirp_from_mass1_mass2(m1, m2)
-
-    return mchirp_astro
+    return mchirp_from_mass1_mass2(m1, m2)
 
 
 def mchirp_sampler_flat(**kwargs):
@@ -524,6 +519,4 @@ def mchirp_sampler_flat(**kwargs):
 
     """
     m1, m2 = draw_flat_samples(**kwargs)
-    mchirp_astro = mchirp_from_mass1_mass2(m1, m2)
-
-    return mchirp_astro
+    return mchirp_from_mass1_mass2(m1, m2)

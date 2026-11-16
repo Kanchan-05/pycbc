@@ -145,7 +145,7 @@ def _test_fft(test_case, inarr, expec, tol):
             # Next, check that the output is correct to within tolerance.
             # That will require exact equality of all other meta-data
             emsg = f"FFT output differs by more than a factor of {tol} from expected"
-            if isinstance(outarr, TimeSeries) or isinstance(outarr, FrequencySeries):
+            if isinstance(outarr, (TimeSeries, FrequencySeries)):
                 tc.assertTrue(
                     outarr.almost_equal_norm(expec, tol=tol, dtol=tol), msg=emsg
                 )
@@ -194,7 +194,7 @@ def _test_ifft(test_case, inarr, expec, tol):
                 "Inverse FFT output differs by more than a factor "
                 f"of {tol} from expected"
             )
-            if isinstance(outarr, TimeSeries) or isinstance(outarr, FrequencySeries):
+            if isinstance(outarr, (TimeSeries, FrequencySeries)):
                 tc.assertTrue(
                     outarr.almost_equal_norm(expec, tol=tol, dtol=tol), msg=emsg
                 )
@@ -253,7 +253,7 @@ def _test_random(test_case, inarr, outarr, tol):
                 "IFFT(FFT(random)) did not reproduce original array to "
                 f"within tolerance {tol}"
             )
-            if isinstance(incopy, TimeSeries) or isinstance(incopy, FrequencySeries):
+            if isinstance(incopy, (TimeSeries, FrequencySeries)):
                 tc.assertTrue(
                     incopy.almost_equal_norm(inarr, tol=tol, dtol=tol), msg=emsg
                 )
@@ -303,7 +303,7 @@ def _test_random(test_case, inarr, outarr, tol):
                 "FFT(IFFT(random)) did not reproduce original array to "
                 f"within tolerance {tol}"
             )
-            if isinstance(outcopy, TimeSeries) or isinstance(outcopy, FrequencySeries):
+            if isinstance(outcopy, (TimeSeries, FrequencySeries)):
                 tc.assertTrue(
                     outcopy.almost_equal_norm(outarr, tol=tol, dtol=tol), msg=emsg
                 )
@@ -543,8 +543,6 @@ class _BaseTestFFTClass(unittest.TestCase):
                 delta_f=delta_f,
             )
             _test_random(self, rand_inarr, rand_outarr, self.tdict[fwd_dtype])
-            # Reuse random arrays for the LAL tests:
-            # _test_lal_tf_fft(self,rand_inarr,rand_outarr,self.tdict[fwd_dtype])
             # Clean these up since they could be big:
             del rand_inarr
             del rand_outarr
@@ -746,11 +744,6 @@ class _BaseTestFFTClass(unittest.TestCase):
                 epoch=self.epoch,
             )
             _test_random(self, rand_inarr, rand_outarr, self.tdict[fwd_dtype])
-            # Reuse random arrays for the LAL tests:
-            # COMMENTED OUT: The LAL Complex TimeFreqFFT and FreqTimeFFT functions perform
-            # a repacking of data because they seem to assume that the array represents both
-            # positive and negative frequencies.  We don't do this, so we don't compare.
-            # _test_lal_tf_fft(self,rand_inarr,rand_outarr,self.tdict[fwd_dtype])
             # Clean these up since they could be big:
             del rand_inarr
             del rand_outarr
@@ -853,21 +846,6 @@ class _BaseTestFFTClass(unittest.TestCase):
             # Random---we don't do that in 'reverse' tests, since both
             # directions are already tested in forward, and if we just passed
             # in arrays in the other order we'd only get exceptions
-            #
-            # However, we do still generate the arrays for T/F series, so that we may
-            # do the LAL comparison test.  As usual, we then delete those arrays.
-            #
-            # COMMENTED OUT: The LAL Complex TimeFreqFFT and FreqTimeFFT functions perform
-            # a repacking of data because they seem to assume that the array represents both
-            # positive and negative frequencies.  We don't do this, so we don't compare.
-            # rand_inarr = fs(zeros(self.rand_len_c,dtype=rev_dtype),epoch=self.epoch,
-            #                delta_f=self.delta)
-            # rand_outarr = ts(zeros(self.rand_len_c,dtype=rev_dtype),epoch=self.epoch,
-            #                 delta_t=self.delta)
-            # _test_lal_tf_ifft(self,rand_inarr,rand_outarr,self.tdict[rev_dtype])
-            # del rand_inarr
-            # del rand_outarr
-            #
             # Check that exceptions are raised.  Need input and
             # output arrays; just reuse inarr and outexp (values won't
             # matter, we're just checking exceptions).

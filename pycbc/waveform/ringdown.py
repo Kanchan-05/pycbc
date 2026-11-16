@@ -108,10 +108,6 @@ def format_lmns(lmns):
     # Cycle over the lmns to ensure that we get back a list of strings that
     # are three digits long, and that nmodes!=0
     for lmn in lmns:
-        # The following line is to be used with Python3 if the lmns are stored
-        # as a list of strings in the HDF files and the workflow converts that
-        # to a string
-        # lmn = lmn.strip(" b'")
         # Try to convert to int and then str, to ensure the right format
         lmn = str(int(lmn))
         if len(lmn) != 3:
@@ -292,7 +288,7 @@ def lm_tfinal(damping_times):
     """
     if isinstance(damping_times, dict):
         t_max = {}
-        for lmn in damping_times.keys():
+        for lmn in damping_times:
             t_max[lmn] = qnm_time_decay(damping_times[lmn], 1.0 / 1000)
         t_final = max(t_max.values())
     else:
@@ -308,7 +304,7 @@ def lm_deltat(freqs, damping_times):
     """
     if isinstance(freqs, dict) and isinstance(damping_times, dict):
         dt = {}
-        for lmn in freqs.keys():
+        for lmn in freqs:
             dt[lmn] = 1.0 / qnm_freq_decay(freqs[lmn], damping_times[lmn], 1.0 / 1000)
         delta_t = min(dt.values())
     elif isinstance(freqs, dict) and not isinstance(damping_times, dict):
@@ -318,9 +314,7 @@ def lm_deltat(freqs, damping_times):
     else:
         delta_t = 1.0 / qnm_freq_decay(freqs, damping_times, 1.0 / 1000)
 
-    delta_t = max(delta_t, min_dt)
-
-    return delta_t
+    return max(delta_t, min_dt)
 
 
 def lm_ffinal(freqs, damping_times):
@@ -330,7 +324,7 @@ def lm_ffinal(freqs, damping_times):
     """
     if isinstance(freqs, dict) and isinstance(damping_times, dict):
         f_max = {}
-        for lmn in freqs.keys():
+        for lmn in freqs:
             f_max[lmn] = qnm_freq_decay(freqs[lmn], damping_times[lmn], 1.0 / 1000)
         f_final = max(f_max.values())
     elif isinstance(freqs, dict) and not isinstance(damping_times, dict):
@@ -339,8 +333,7 @@ def lm_ffinal(freqs, damping_times):
         raise ValueError("Missing frequencies.")
     else:
         f_final = qnm_freq_decay(freqs, damping_times, 1.0 / 1000)
-    f_final = min(f_final, max_freq)
-    return f_final
+    return min(f_final, max_freq)
 
 
 def lm_deltaf(damping_times):
@@ -351,7 +344,7 @@ def lm_deltaf(damping_times):
     """
     if isinstance(damping_times, dict):
         df = {}
-        for lmn in damping_times.keys():
+        for lmn in damping_times:
             df[lmn] = 1.0 / qnm_time_decay(damping_times[lmn], 1.0 / 1000)
         delta_f = min(df.values())
     else:
@@ -526,41 +519,38 @@ def td_damped_sinusoid(
     with central frequency f_0, damping time tau, amplitude amp and phase phi.
 
     This returns the plus and cross polarization of the QNM, defined as
-    :math:`h^{+,\times}_{l|m|n} = (\Re, \Im) \{ h_{l|m|n}(t)\right}`, where
+    :math:`h^{+}_{l|m|n} + i h^{\times}_{l|m|n} = h_{l|m|n}(t)`, i.e.,
+    :math:`h^{+}_{l|m|n} = \Re\left\{h_{l|m|n}(t)\right\}` and
+    :math:`h^{\times}_{l|m|n} = \Im\left\{h_{l|m|n}(t)\right\}`, where
 
     .. math::
 
-        h_{l|m|n}(t) &:= A_{lmn} X_{lmn}(\theta, \varphi)
-            e^{-t/\tau_{lmn} + i(2\pi f_{lmn}t + \phi_{lmn})} \\
-            & + A_{l-mn} X_{l-mn}(\theta, \varphi)
-            e^{-t/\tau_{lmn} - i(2\pi f_{lmn}t + \phi_{l-mn})}
+        h_{l|m|n}(t) &:= A^0_{lmn} e^{-t/\tau_{lmn}} \left[
+            X_{lmn}(\theta, \varphi) A^{(+)}_{lmn}
+            e^{i(2\pi f_{lmn} t + \phi_{lmn})} \right. \\
+            &\left. \qquad + X_{l-mn}(\theta, \varphi) A^{(-)}_{lmn}
+            e^{-i(2\pi f_{lmn} t + \phi_{lmn})} \right].
 
     Here, the :math:`X_{lmn}(\theta, \varphi)` are either the spherical or
     spheroidal harmonics, or an arbitrary complex number, depending on the
     input arguments. This uses the convention that the +/-m modes are
-    related to each other via  :math:`f_{l-mn} = -f_{lmn}` and
-    :math:`\tau_{l-mn} = \tau_{lmn}`. The amplitudes :math:`A_{l(-)mn}` and
-    phases :math:`\phi_{l(-)mn}` of the +/-m modes are related to each other
-    by:
+    related to each other via :math:`f_{l-mn} = -f_{lmn}` and
+    :math:`\tau_{l-mn} = \tau_{lmn}`. The relative amplitudes and phases of
+    the +/-m modes are given by:
 
     .. math::
 
-        \phi_{l-mn} = l\pi + \Delta \phi_{lmn} - \phi_{lmn}
-
-    and
-
-    .. math::
-
-        A_{lmn} &= A^0_{lmn} \sqrt{2} \cos(\pi/4 + \Delta \beta_{lmn})\\
-        A_{lmn} &= A^0_{lmn} \sqrt{2} \sin(\pi/4 +  \Delta \beta_{lmn}).
+        A^{(+)}_{lmn} &= \sqrt{2} \cos(\pi/4 + \Delta \beta_{lmn}), \\
+        A^{(-)}_{lmn} &= \sqrt{2} \sin(\pi/4 + \Delta \beta_{lmn})
+            e^{i(l\pi + \Delta \phi_{lmn})}.
 
     Here, :math:`A^0_{lmn}` is an overall fiducial amplitude (set by the
-    ``amp``) parameter, and
+    ``amp`` parameter), and
 
     .. math::
 
-        \Delta \beta_{lmn} &\in [-pi/4, pi/4], \\
-        \Delta \phi_{lmn}  &\in (-pi, pi)
+        \Delta \beta_{lmn} &\in [-\pi/4, \pi/4), \\
+        \Delta \phi_{lmn} &\in [-\pi, \pi)
 
     are parameters that define the deviation from circular polarization.
     Circular polarization occurs when both :math:`\Delta \beta_{lmn}` and
@@ -827,10 +817,7 @@ def multimode_base(input_params, domain, freq_tau_approximant=False, sum_modes=T
     except KeyError:
         harmonics = "spherical"
     # we'll need the final spin for spheroidal harmonics
-    if harmonics == "spheroidal":
-        final_spin = input_params["final_spin"]
-    else:
-        final_spin = None
+    final_spin = input_params["final_spin"] if harmonics == "spheroidal" else None
     # add inclination and azimuthal if they aren't provided
     if "inclination" not in input_params:
         input_params["inclination"] = 0.0
@@ -846,7 +833,7 @@ def multimode_base(input_params, domain, freq_tau_approximant=False, sum_modes=T
         )
         norm = (
             kerr_factor(input_params["final_mass"], input_params["distance"])
-            if "distance" in input_params.keys()
+            if "distance" in input_params
             else 1.0
         )
         for mode, freq in freqs.items():

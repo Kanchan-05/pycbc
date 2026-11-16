@@ -671,7 +671,7 @@ def get_inspiral_tf(
     params.spin1z = spin1
     params.spin2z = spin2
     try:
-        approximant = eval(approximant, {"__builtins__": None}, dict(params=params))
+        approximant = eval(approximant, {"__builtins__": None}, {"params": params})
     except (NameError, TypeError):
         pass
 
@@ -922,7 +922,7 @@ def energy_coefficients(m1, m2, s1z=0, s2z=0, phase_order=-1, spin_order=-1):
     ESS2 = 1.0 / eta  # noqa: N806
     EQM2s1 = qmdef1 / 2.0 / m1M / m1M  # noqa: N806
     EQM2s1L = -qmdef1 * 3.0 / 2.0 / m1M / m1M  # noqa: N806
-    # EQM2s2 = qmdef2/2.0/m2M/m2M
+    # EQM2s2 = qmdef2/2.0/m2M/m2M  # noqa: ERA001
     EQM2s2L = -qmdef2 * 3.0 / 2.0 / m2M / m2M  # noqa: N806
 
     ESO25s1 = 11.0 - 61.0 * eta / 9.0 + (dm / m1M) * (-3.0 + 10.0 * eta / 3.0)  # noqa: N806
@@ -1057,7 +1057,7 @@ def hybrid_energy(v, m1, m2, chi1, chi2, qm1, qm2):
         (1.0 - chi * v3) * (1.0 + chi * v3 - 3.0 * v2 * (1 - chi * v3) ** (1.0 / 3.0))
     )
 
-    h_E = Kerr - (v2 / 2.0) * (  # noqa: N806
+    return Kerr - (v2 / 2.0) * (
         -eta * v2 / 12.0
         - 2 * (chi1 + chi2) * eta * v3 / 3.0
         + (
@@ -1113,8 +1113,6 @@ def hybrid_energy(v, m1, m2, chi1, chi2, qm1, qm2):
         )
         * v7
     )
-
-    return h_E
 
 
 def hybrid_meco_velocity(m1, m2, chi1, chi2, qm1=None, qm2=None):
@@ -1283,7 +1281,7 @@ def jframe_to_l0frame(
             phiref,
         )
     )
-    out = {
+    return {
         "inclination": inclination,
         "spin1x": spin1x,
         "spin1y": spin1y,
@@ -1292,7 +1290,6 @@ def jframe_to_l0frame(
         "spin2y": spin2y,
         "spin2z": spin2z,
     }
-    return out
 
 
 def l0frame_to_jframe(
@@ -1385,7 +1382,7 @@ def l0frame_to_jframe(
             phiref,
         )
     )
-    out = {
+    return {
         "thetajn": thetajn,
         "phijl": phijl,
         "spin1_polar": s1pol,
@@ -1394,4 +1391,3 @@ def l0frame_to_jframe(
         "spin1_a": spin1_a,
         "spin2_a": spin2_a,
     }
-    return out

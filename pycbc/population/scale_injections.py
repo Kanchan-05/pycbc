@@ -80,7 +80,7 @@ def read_injections(sim_files, m_dist, s_dist, d_dist):
         injections[key]["m2_range"] = [min(mass2), max(mass2)]
         injections[key]["d_range"] = [min(distance), max(distance)]
 
-        min_d, max_d = min(min_d, min(distance)), max(max_d, max(distance))
+        min_d, max_d = min(min_d, min(distance)), max(max_d, max(distance))  # noqa: PLW3301
 
     injections["z_range"] = [dlum_to_z(min_d), dlum_to_z(max_d)]
 
@@ -126,7 +126,7 @@ def estimate_vt(injections, mchirp_sampler, model_pdf, **kwargs):
     mch_astro_det = mch_astro * (1.0 + z_astro)
     idx_within = np.zeros(nsamples)
 
-    for key in injections.keys():
+    for key in injections:
         if key == "z_range":
             # This is repeated down again and is so
             continue
@@ -170,8 +170,8 @@ def estimate_vt(injections, mchirp_sampler, model_pdf, **kwargs):
         mass1, mass2 = data["mass1"], data["mass2"]
         spin1z, spin2z = data["spin1z"], data["spin2z"]
         mchirp = data["chirp_mass"]
-        gps_min = min(gps_min, min(data["end_time"]))
-        gps_max = max(gps_max, max(data["end_time"]))
+        gps_min = min(gps_min, min(data["end_time"]))  # noqa: PLW3301
+        gps_max = max(gps_max, max(data["end_time"]))  # noqa: PLW3301
 
         z_inj = dlum_to_z(distance)
         m1_sc, m2_sc = mass1 / (1 + z_inj), mass2 / (1 + z_inj)
@@ -200,7 +200,7 @@ def estimate_vt(injections, mchirp_sampler, model_pdf, **kwargs):
 
             # Get probability density for injections in mass-distance space
             if dt_j["m_dist"] == "totalMass":
-                lomass, himass = min(min(m1_j), min(m2_j), max(max(m1_j), max(m2_j)))
+                lomass, himass = min(min(m1_j), min(m2_j)), max(max(m1_j), max(m2_j))  # noqa: PLW3301
                 lomass_2, himass_2 = lomass, himass
             elif dt_j["m_dist"] == "componentMass" or dt_j["m_dist"] == "log":
                 lomass, himass = min(m1_j), max(m1_j)
@@ -492,9 +492,7 @@ def inj_spin_pdf(key, high_spin, spinz):
     if key == "disable_spin":
         # Returns unit array
 
-        pdf = np.ones_like(spinz)
-
-        return pdf
+        return np.ones_like(spinz)
 
 
 def inj_distance_pdf(key, distance, low_dist, high_dist, mchirp=1):

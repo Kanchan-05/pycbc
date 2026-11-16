@@ -151,11 +151,7 @@ def posterior_step(logposts, dim):
     criteria = dim / 2.0
     dp = numpy.diff(logposts)
     indices = numpy.where(dp >= criteria)[0]
-    if indices.size > 0:
-        idx = indices[-1] + 1
-    else:
-        idx = 0
-    return idx
+    return indices[-1] + 1 if indices.size > 0 else 0
 
 
 def nacl(nsamples, acls, nacls=5):
@@ -363,8 +359,7 @@ class BaseBurnInTests(metaclass=ABCMeta):
                 thin_interval=1,
                 flatten=False,
             )
-            logposts = samples["loglikelihood"] + samples["logprior"]
-        return logposts
+            return samples["loglikelihood"] + samples["logprior"]
 
     def _getacls(self, filename, start_index):
         """Convenience function for calculating acls for the given filename."""
@@ -408,10 +403,7 @@ class BaseBurnInTests(metaclass=ABCMeta):
         """
         niters = self._getniters(filename)
         is_burned_in = self._min_iterations < niters
-        if is_burned_in:
-            burn_in_iter = self._min_iterations
-        else:
-            burn_in_iter = NOT_BURNED_IN_ITER
+        burn_in_iter = self._min_iterations if is_burned_in else NOT_BURNED_IN_ITER
         self.test_is_burned_in["min_iterations"] = is_burned_in
         self.test_burn_in_iteration["min_iterations"] = burn_in_iter
 
@@ -468,7 +460,7 @@ class BaseBurnInTests(metaclass=ABCMeta):
                     fp.write_data(name, data, subpath)
 
     @staticmethod
-    def _extra_tests_from_config(cp, section, tag):
+    def _extra_tests_from_config(cp, section, tag):  # noqa: ARG004
         """For loading class-specific tests."""
         # pylint: disable=unused-argument
         return {}
@@ -837,5 +829,4 @@ def _multitemper_getlogposts(sampler, filename):
         for stat, arr in samples.items():
             _, nwalkers, niterations = arr.shape
             samples[stat] = arr.reshape((nwalkers, niterations))
-        logposts = samples["loglikelihood"] + samples["logprior"]
-    return logposts
+        return samples["loglikelihood"] + samples["logprior"]

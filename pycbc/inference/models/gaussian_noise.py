@@ -1023,7 +1023,7 @@ class GaussianNoise(BaseGaussianNoise):
         """Calculate a multi-model (signal) likelihood"""
         # Generate the waveforms for each submodel
         wfs = []
-        for m in models + [self]:
+        for m in [*models, self]:
             wfs.append(m.get_waveforms())
 
         # combine into a single waveform
@@ -1231,10 +1231,7 @@ def get_values_from_injection(cp, injection_file, update_cp=True):
                 if subval.startswith(lookfor):
                     # determine what we should retrieve from the injection
                     subval = subval.split(":", 1)
-                    if len(subval) == 1:
-                        subval = opt
-                    else:
-                        subval = subval[1]
+                    subval = opt if len(subval) == 1 else subval[1]
                     replace_this.append((ii, subval))
             if replace_this:
                 replace_params.append((sec, opt, splitvals, replace_this))
@@ -1266,7 +1263,7 @@ def get_values_from_injection(cp, injection_file, update_cp=True):
         # versions of python, the following kludge tries to account for that.
         # If/when we drop support for all earlier versions of python, then the
         # following can just be replaced by:
-        # replace_val = shlex.join(splitvals)
+        # replace_val = shlex.join(splitvals)  # noqa: ERA001
         for jj, arg in enumerate(splitvals):
             if " " in arg:
                 arg = "'" + arg + "'"
@@ -1356,7 +1353,7 @@ def create_waveform_generator(
             raise ValueError(
                 "data must all have the same delta_t, delta_f, and start_time"
             )
-    waveform_generator = generator_class(
+    return generator_class(
         gen_function,
         epoch=start_time,
         variable_args=variable_params,
@@ -1367,4 +1364,3 @@ def create_waveform_generator(
         gates=gates,
         **static_params,
     )
-    return waveform_generator

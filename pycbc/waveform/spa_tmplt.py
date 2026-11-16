@@ -202,9 +202,10 @@ def spa_tmplt_engine(
     amp_factor,
 ):
     """Calculate the spa tmplt phase"""
-    err_msg = "This function is a stub that should be overridden using the "
-    err_msg += "scheme. You shouldn't be seeing this error!"
-    raise ValueError(err_msg)
+    raise NotImplementedError(
+        "This function is a stub that should be overridden using the "
+        "scheme. You shouldn't be seeing this error!"
+    )
 
 
 def spa_tmplt(**kwds):
@@ -215,13 +216,9 @@ def spa_tmplt(**kwds):
     s1z = kwds["spin1z"]
     s2z = kwds["spin2z"]
     phase_order = int(kwds["phase_order"])
-    # amplitude_order = int(kwds['amplitude_order'])
     spin_order = int(kwds["spin_order"])
 
-    if "out" in kwds:
-        out = kwds["out"]
-    else:
-        out = None
+    out = kwds.get("out")
 
     amp_factor = spa_amplitude_factor(mass1=mass1, mass2=mass2) / distance
 

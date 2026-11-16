@@ -1,9 +1,12 @@
 #!/usr/bin/python
 import ctypes
+import logging
 import os
 import subprocess
 
 from mako.template import Template
+
+logger = logging.getLogger(__name__)
 
 full_corr = """
     __device__ cufftComplex in_call(void* input, size_t offset,
@@ -176,16 +179,17 @@ def compile(source, name):
     obj_file = cache + ".o"
 
     try:
-        if int(open(hash_file).read()) == hash(source):
+        with open(hash_file) as fp:
+            cached_hash = int(fp.read())
+        if cached_hash == hash(source):
             return lib_file
         raise ValueError
     except:
         pass
 
     src_file = cache + ".cu"
-    fsrc = open(src_file, "w")
-    fsrc.write(source)
-    fsrc.close()
+    with open(src_file, "w") as fsrc:
+        fsrc.write(source)
 
     cmd = [
         "nvcc",
@@ -200,7 +204,7 @@ def compile(source, name):
         "-c",
         src_file,
     ]
-    print(" ".join(cmd))
+    logger.info("%s", " ".join(cmd))
     subprocess.check_call(cmd)
 
     cmd = [
@@ -215,13 +219,13 @@ def compile(source, name):
         "-lcufft_static",
         "-lculibos",
     ]
-    print(" ".join(cmd))
+    logger.info("%s", " ".join(cmd))
 
     subprocess.check_call(cmd)
 
     hash_file = cache + ".hash"
-    fhash = open(hash_file, "w")
-    fhash.write(str(hash(source)))
+    with open(hash_file, "w") as fhash:
+        fhash.write(str(hash(source)))
     return lib_file
 
 

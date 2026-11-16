@@ -1,6 +1,9 @@
 import configparser
 import copy
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def parse_workflow_ini_file(cp_file, parsed_filepath=None):
@@ -22,29 +25,20 @@ def parse_workflow_ini_file(cp_file, parsed_filepath=None):
     """
     # First read the .ini file
     cp = read_ini_file(cp_file)
-    print(cp.sections())
-
-    # Check for any substitutions that can be made
-    # FIXME: The python 3 version of ConfigParser can do this automatically
-    # move over to that if it can be backported to python2.X.
-    # We use the same formatting as the new configparser module when doing
-    # ExtendedInterpolation
-    # This is described at http://docs.python.org/3.4/library/configparser.html
-    # cp = perform_extended_interpolation(cp)
+    logger.debug("Sections: %s", cp.sections())
 
     # Split sections like [inspiral&tmplt] into [inspiral] and [tmplt]
     cp = split_multi_sections(cp)
-    print(cp.sections())
+    logger.debug("Sections: %s", cp.sections())
 
     # Check for duplicate options in sub-sections
     sanity_check_subsections(cp)
-    print(cp.sections())
+    logger.debug("Sections: %s", cp.sections())
 
     # Dump parsed .ini file if needed
     if parsed_filepath:
-        fp = open(parsed_filepath, "w")
-        cp.write(fp)
-        fp.close()
+        with open(parsed_filepath, "w") as fp:
+            cp.write(fp)
 
     return cp
 
@@ -67,9 +61,8 @@ def read_ini_file(cp_file):
     # Initialise ConfigParser class
     cp = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
     # Read the file
-    fp = open(cp_file)
-    cp.read_file(fp)
-    fp.close()
+    with open(cp_file) as fp:
+        cp.read_file(fp)
     return cp
 
 
@@ -279,12 +272,11 @@ def add_options_to_section(
 
     # Check for duplicate options first
     for option, value in items:
-        if not overwrite_options:
-            if option in cp.options(section):
-                raise ValueError(
-                    "Option %s exists in both original"
-                    + "ConfigParser and input list" % (option,)
-                )
+        if not overwrite_options and option in cp.options(section):
+            raise ValueError(
+                "Option %s exists in both original"
+                + "ConfigParser and input list" % (option,)
+            )
         cp.set(section, option, value)
 
     return cp

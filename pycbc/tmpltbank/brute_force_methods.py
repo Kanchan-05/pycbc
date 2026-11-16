@@ -7,10 +7,11 @@ from pycbc.tmpltbank.coord_utils import get_cov_params
 logger = logging.getLogger(__name__)
 
 
+# best_xis is unused, but kept so that existing calls keep working
 def get_physical_covaried_masses(
     xis,
     best_masses,
-    best_xis,
+    best_xis,  # noqa: ARG001
     req_match,
     mass_range_params,
     metric_params,
@@ -86,9 +87,8 @@ def get_physical_covaried_masses(
     curr_dist = 100000000000000000
     while 1:
         # If we are a long way away we use larger jumps
-        if count:
-            if curr_dist > 1 and scale_factor == orig_scale_factor:
-                scale_factor = orig_scale_factor * 10
+        if count and curr_dist > 1 and scale_factor == orig_scale_factor:
+            scale_factor = orig_scale_factor * 10
         # Get a set of test points with mass -> xi mappings
         totmass, eta, spin1z, spin2z, mass1, mass2, new_xis = get_mass_distribution(
             [best_chirpmass, best_masses[1], best_masses[2], best_masses[3]],
@@ -148,6 +148,7 @@ def get_physical_covaried_masses(
     raise RuntimeError
 
 
+# spin2z_jump_fac is unused, but kept so that existing calls keep working
 def get_mass_distribution(
     best_masses,
     scale_factor,
@@ -158,7 +159,7 @@ def get_mass_distribution(
     chirp_mass_jump_fac=0.0001,
     eta_jump_fac=0.01,
     spin1z_jump_fac=0.01,
-    spin2z_jump_fac=0.01,
+    spin2z_jump_fac=0.01,  # noqa: ARG001
 ):
     """
     Given a set of masses, this function will create a set of points nearby
@@ -491,10 +492,11 @@ def stack_xi_direction_brute(
     return ximin, ximax
 
 
+# best_xis is unused, but kept so that existing calls keep working
 def find_xi_extrema_brute(
     xis,
     best_masses,
-    best_xis,
+    best_xis,  # noqa: ARG001
     direction_num,
     req_match,
     mass_range_params,
@@ -560,10 +562,7 @@ def find_xi_extrema_brute(
     # Setup
     xi_size = len(xis)
     best_chirpmass = best_masses[0] * (best_masses[1]) ** (3.0 / 5.0)
-    if find_minimum:
-        xiextrema = 10000000000
-    else:
-        xiextrema = -100000000000
+    xiextrema = 10000000000 if find_minimum else -100000000000
 
     for _ in range(num_iterations):
         # Evaluate extrema of the xi direction specified

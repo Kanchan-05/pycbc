@@ -185,7 +185,9 @@ def fermi_core_tail_model(
     scaledsq = sky_err**2 / -2 / np.log(0.32)
     return (
         frac * (1 - np.exp(-0.5 * (rad / np.sqrt(scaledsq + sigma**2)) ** 2))
-        for frac, sigma in zip([core_frac, 1 - core_frac], [core_sigma, tail_sigma])
+        for frac, sigma in zip(
+            [core_frac, 1 - core_frac], [core_sigma, tail_sigma], strict=True
+        )
     )
 
 
@@ -297,15 +299,16 @@ def generate_tc_prior(wflow, tc_path, buffer_seg):
     # Write the tc-prior configuration file if it does not exist
     if os.path.exists(tc_path):
         raise ValueError(f"Refusing to overwrite {tc_path}.")
-    tc_file = open(tc_path, "w")
-    tc_file.write("[prior-tc]\n")
-    tc_file.write("name = uniform\n")
-    tc_file.write(f"min-tc = {wflow.analysis_time[0]}\n")
-    tc_file.write(f"max-tc = {wflow.analysis_time[1]}\n\n")
-    tc_file.write("[constraint-tc]\n")
-    tc_file.write("name = custom\n")
-    tc_file.write(f"constraint_arg = (tc < {buffer_seg[0]}) | (tc > {buffer_seg[1]})\n")
-    tc_file.close()
+    with open(tc_path, "w") as tc_file:
+        tc_file.write("[prior-tc]\n")
+        tc_file.write("name = uniform\n")
+        tc_file.write(f"min-tc = {wflow.analysis_time[0]}\n")
+        tc_file.write(f"max-tc = {wflow.analysis_time[1]}\n\n")
+        tc_file.write("[constraint-tc]\n")
+        tc_file.write("name = custom\n")
+        tc_file.write(
+            f"constraint_arg = (tc < {buffer_seg[0]}) | (tc > {buffer_seg[1]})\n"
+        )
 
     # Add the tc-prior configuration file url to wflow.cp if necessary
     tc_file_path = "file://" + tc_path
@@ -502,9 +505,7 @@ def build_segment_filelist(seg_dir):
     file_names = ["bufferSeg.txt", "offSourceSeg.txt", "onSourceSeg.txt"]
     seg_files = [os.path.join(seg_dir, fn) for fn in file_names]
     seg_files = [resolve_url_to_file(sf) for sf in seg_files]
-    seg_files = FileList(seg_files)
-
-    return seg_files
+    return FileList(seg_files)
 
 
 def make_pygrb_plot(
@@ -579,7 +580,7 @@ def make_pygrb_plot(
                 workflow.analysis_time,
                 ".png",
                 "--background-output-file",
-                tags=extra_tags + ["max_background"],
+                tags=[*extra_tags, "max_background"],
             )
         # Output the exclusion distance plot and table
         else:
@@ -588,7 +589,7 @@ def make_pygrb_plot(
                 workflow.analysis_time,
                 ".png",
                 "--onsource-output-file",
-                tags=["onsource"] + extra_tags,
+                tags=["onsource", *extra_tags],
             )
             node.new_output_file_opt(
                 workflow.analysis_time,
@@ -633,13 +634,6 @@ def make_pygrb_plot(
                 node.add_opt("--" + log_flag)
     elif exec_name == "pycbc_plot_bank_corner":
         node.add_opt("--no-suptitle")
-        # if inj_file:
-        #    node.add_opt('--title', f'\"{tags[0]} injections\"')
-        #    params = workflow.cp.get_opt_tags(exec_name, 'parameters', ['injs'])
-        # else:
-        #    node.add_opt('--title', '\"Template bank\"')
-        #    params = workflow.cp.get_opt_tags(exec_name, 'parameters', ['bank'])
-        # node.add_opt('--parameters', params)
 
     # Add job node to workflow
     workflow += node
@@ -739,7 +733,7 @@ def make_pygrb_injs_tables(
             workflow.analysis_time,
             ".h5",
             "--quiet-found-injs-h5-output-file",
-            tags=extra_tags + ["QUIET_FOUND"],
+            tags=[*extra_tags, "QUIET_FOUND"],
         )
     # Handle input/output for onsource/offsource
     else:
@@ -819,10 +813,10 @@ def setup_pygrb_minifollowups(
     config_path = os.path.abspath(
         dax_output + "/" + "_".join(tags) + "_minifollowup.ini"
     )
-    workflow.cp.write(open(config_path, "w"))
+    with open(config_path, "w") as fp:
+        workflow.cp.write(fp)
     config_file = resolve_url_to_file(config_path)
 
-    # wikifile = curr_ifo + '_'.join(tags) + 'loudest_table.txt'
     wikifile = "_".join(tags) + "loudest_table.txt"
 
     # Create the node
@@ -911,7 +905,6 @@ def setup_pygrb_results_workflow(
     """
     tags = [] if tags is None else tags
     dax_output = res_dir + "/webpage_daxes"
-    # _workflow.makedir(dax_output)
     makedir(dax_output)
 
     # Create the node
@@ -925,7 +918,6 @@ def setup_pygrb_results_workflow(
     node = exe.create_node()
     # Grab and pass all necessary files
     node.add_input_list_opt("--trig-files", trig_files)
-    # node.add_input_opt('--config-files', config_file)
     node.add_input_list_opt("--full-inj-files", full_injs_files)
     node.add_input_list_opt("--inj-files", inj_files)
     node.add_input_opt("--bank-file", bank_file)
@@ -951,7 +943,8 @@ def setup_pygrb_results_workflow(
 
     # Turn the config file into a File instance
     config_path = os.path.abspath(dax_output + "/" + "_".join(tags) + "webpage.ini")
-    workflow.cp.write(open(config_path, "w"))
+    with open(config_path, "w") as fp:
+        workflow.cp.write(fp)
     config_file = resolve_url_to_file(config_path)
     node.add_input_opt("--config-files", config_file)
 

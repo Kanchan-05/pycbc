@@ -142,11 +142,7 @@ def get_optional_arg_from_config(cp, section, arg, dtype=str):
         If the argument is present, the value. Otherwise, None.
 
     """
-    if cp.has_option(section, arg):
-        val = dtype(cp.get(section, arg))
-    else:
-        val = None
-    return val
+    return dtype(cp.get(section, arg)) if cp.has_option(section, arg) else None
 
 
 #
@@ -369,10 +365,9 @@ class BaseMCMC(metaclass=ABCMeta):
         if pos is None:
             return self.p0
         # convert to dict
-        pos = {
+        return {
             param: self._pos[..., k] for (k, param) in enumerate(self.sampling_params)
         }
-        return pos
 
     @property
     def p0(self):
@@ -385,8 +380,9 @@ class BaseMCMC(metaclass=ABCMeta):
         if self._p0 is None:
             raise ValueError("initial positions not set; run set_p0")
         # convert to dict
-        p0 = {param: self._p0[..., k] for (k, param) in enumerate(self.sampling_params)}
-        return p0
+        return {
+            param: self._p0[..., k] for (k, param) in enumerate(self.sampling_params)
+        }
 
     def set_p0(self, samples_file=None, prior=None):
         """
@@ -430,7 +426,7 @@ class BaseMCMC(metaclass=ABCMeta):
             )
         # store as ND array with shape [base_shape] x nparams
         ndim = len(self.variable_params)
-        p0 = numpy.ones(list(self.base_shape) + [ndim])
+        p0 = numpy.ones([*list(self.base_shape), ndim])
         for i, param in enumerate(self.sampling_params):
             p0[..., i] = samples[param]
         self._p0 = p0
@@ -821,7 +817,7 @@ class BaseMCMC(metaclass=ABCMeta):
 
         """
         # flatten samples for evaluating
-        orig_shape = list(samples.values())[0].shape
+        orig_shape = next(iter(samples.values())).shape
         flattened_samples = {p: arr.ravel() for p, arr in list(samples.items())}
         # convert to a list of tuples so we can use map function
         params = list(flattened_samples.keys())
@@ -880,10 +876,7 @@ class EnsembleSupport:
         act = self.act
         if act is None:
             act = numpy.inf
-        if self.burn_in is None:
-            start_iter = 0
-        else:
-            start_iter = self.burn_in.burn_in_iteration
+        start_iter = 0 if self.burn_in is None else self.burn_in.burn_in_iteration
         nperwalker = nsamples_in_chain(start_iter, act, self.niterations)
         if self.burn_in is not None:
             # after burn in, we always have atleast 1 sample per walker
