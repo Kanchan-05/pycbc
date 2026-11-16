@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Generate a PyCBC workflow to find glitches
+"""
+
+import argparse
+import logging
+import os
+import sys
+
+import igwn_segments as segments
+import pycbc
+import pycbc.workflow as wf
+from pycbc.results import layout
+
+
+def save_and_exit(container, workflow):
+    """Save the Pegasus workflow without constructing results web pages."""
+    container += workflow
+    container.save()
+    logging.info("Saved workflow in %s", os.getcwd())
+    logging.shutdown()
+    sys.exit(0)
+
+
+def check_stop(job_name, container, workflow):
+    """Honor the existing stop-after checkpoints."""
+    if workflow.cp.has_option("workflow", "stop-after"):
+        if workflow.cp.get("workflow", "stop-after") == job_name:
+            logging.info("Stopping workflow after %s", job_name)
+            save_and_exit(container, workflow)
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+pycbc.add_common_pycbc_options(parser)
+wf.add_workflow_command_line_group(parser)
+wf.add_workflow_settings_cli(parser)
+args = parser.parse_args()
+pycbc.init_logging(args.verbose, default_level=1)
+
+container = wf.Workflow(args, args.workflow_name)
+workflow = wf.Workflow(args, args.workflow_name + "-main")
+
+wf.makedir(args.output_dir)
+os.chdir(args.output_dir)
+
+# Keep the upstream segment-output directory structure unchanged.
+rdir = layout.SectionNumber(
+    "results",
+    [
+        "analysis_time",
+        "detector_sensitivity",
+        "data_quality",
+        "single_triggers",
+        "background_triggers",
+        "injections",
+        "search_sensitivity",
+        "open_box_result",
+        "workflow",
+    ],
+)
+wf.makedir(rdir.base)
+wf.makedir(rdir["workflow"])
+
+# Original science/veto/DQ segments, data discovery and bank generation.
+sci_seg_name = "science"
+science_seg_file = wf.get_segments_file(
+    workflow,
+    sci_seg_name,
+    "segments-science",
+    rdir["analysis_time/segment_data"],
+    tags=["science"],
+)
+ssegs = {}
+for ifo in workflow.ifos:
+    ssegs[ifo] = science_seg_file.segment_dict["%s:science" % ifo]
+hoft_tags = []
+if "hoft" in workflow.cp.get_subsections("workflow-datafind"):
+    hoft_tags = ["hoft"]
+datafind_files, analyzable_file, analyzable_segs, analyzable_name = (
+    wf.setup_datafind_workflow(
+        workflow, ssegs, "datafind", seg_file=science_seg_file, tags=hoft_tags
+    )
+)
+final_veto_name = "vetoes"
+final_veto_file = wf.get_segments_file(
+    workflow,
+    final_veto_name,
+    "segments-vetoes",
+    rdir["analysis_time/segment_data"],
+    tags=["veto"],
+)
+dq_flag_name = "dq_flag"
+dq_segment_file = wf.get_flag_segments_file(
+    workflow,
+    dq_flag_name,
+    "segments-dq",
+    rdir["analysis_time/segment_data"],
+    tags=["dq"],
+)
+hdfbank = wf.setup_tmpltbank_workflow(
+    workflow, analyzable_segs, datafind_files, output_dir="bank", return_format="hdf"
+)
+assert len(hdfbank) == 1
+hdfbank = hdfbank[0]
+splitbank_files_fd = wf.setup_splittable_workflow(
+    workflow, [hdfbank], out_dir="bank", tags=["full_data"]
+)
+
+# Original matched filtering, trigger merge, DQ reranking and segment bookkeeping.
+output_dir = "full_data"
+logging.info("Setting up full-data matched-filter jobs.")
+ind_insps = wf.setup_matchedfltr_workflow(
+    workflow,
+    analyzable_segs,
+    datafind_files,
+    splitbank_files_fd,
+    output_dir,
+    tags=["full_data"],
+)
+check_stop("inspiral", container, workflow)
+logging.info("Setting up single-detector HDF trigger merge jobs.")
+insps = wf.merge_single_detector_hdf_files(
+    workflow, hdfbank, ind_insps, output_dir, tags=["full_data"]
+)
+check_stop("hdf_trigger_merge", container, workflow)
+full_insps = insps
+logging.info("Setting up single-detector DQ reranking products.")
+dqfiles, dqfile_labels = wf.setup_dq_reranking(
+    workflow,
+    insps,
+    hdfbank,
+    analyzable_file,
+    analyzable_name,
+    dq_segment_file,
+    output_dir="dq",
+    tags=["full_data"],
+)
+statfiles = wf.FileList(dqfiles)
+trig_generated_name = "TRIGGERS_GENERATED"
+trig_generated_segs = {}
+data_analysed_name = "DATA_ANALYSED"
+data_analysed_segs = {}
+insp_files_seg_dict = segments.segmentlistdict()
+for ifo, files in zip(*ind_insps.categorize_by_attr("ifo")):
+    trig_generated_segs[ifo] = segments.segmentlist([f.segment for f in files])
+    data_analysed_segs[ifo] = segments.segmentlist(
+        [f.metadata["data_seg"] for f in files]
+    )
+    trig_generated_segs[ifo] = segments.segmentlist(set(trig_generated_segs[ifo]))
+    data_analysed_segs[ifo] = segments.segmentlist(set(data_analysed_segs[ifo]))
+    insp_files_seg_dict[ifo + ":" + trig_generated_name] = trig_generated_segs[ifo]
+    insp_files_seg_dict[ifo + ":" + data_analysed_name] = data_analysed_segs[ifo]
+insp_files_seg_file = wf.SegFile.from_segment_list_dict(
+    "INSP_SEGMENTS",
+    insp_files_seg_dict,
+    valid_segment=workflow.analysis_time,
+    extension="xml",
+    directory=rdir["analysis_time/segment_data"],
+)
+
+# Analysis timeline plots (same segment inputs and tags as upstream).
+logging.info("Setting up analysis segment timeline plots.")
+wf.make_segments_plot(
+    workflow,
+    [insp_files_seg_file],
+    rdir["analysis_time/segments"],
+    tags=[trig_generated_name],
+)
+curr_files = [science_seg_file, analyzable_file, insp_files_seg_file]
+curr_names = [sci_seg_name, analyzable_name, trig_generated_name]
+seg_summ_plot = wf.make_seg_plot(
+    workflow, curr_files, rdir["analysis_time/segments"], curr_names, ["SUMMARY"]
+)
+
+# Matched-filter throughput plot: preserve upstream optional config gate.
+if workflow.cp.has_option_tags(
+    "workflow-matchedfilter", "plot-throughput", tags=["full_data"]
+):
+    logging.info("Setting up matched-filter throughput plot.")
+    throughput_plot = wf.make_throughput_plot(
+        workflow, full_insps, rdir["workflow/throughput"], tags=["full_data"]
+    )
+
+# Save the effective workflow configuration, as in the original workflow.
+base = rdir["workflow/configuration"]
+wf.makedir(base)
+ini_file_path = os.path.join(base, "configuration.ini")
+with open(ini_file_path, "w") as ini_fh:
+    container.cp.write(ini_fh)
+
+logging.info("Finalizing workflow with analysis timeline and throughput plots only.")
+save_and_exit(container, workflow)
